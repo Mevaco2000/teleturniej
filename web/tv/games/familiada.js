@@ -34,6 +34,7 @@
 
   function statusLine(g) {
     if (g.screen === "duel_buzz") {
+      if (g.duelists.length < 2) return esc(g.duelists[0].name) + ", znasz odpowiedź?";
       return "Pojedynek: " + g.duelists.map(function (p) { return esc(p.name); }).join(" kontra ") + ". Kto pierwszy?";
     }
     if (g.screen === "answer") {

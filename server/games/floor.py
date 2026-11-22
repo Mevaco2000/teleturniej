@@ -73,11 +73,6 @@ class Floor(Game):
         ]},
     ]
 
-    @classmethod
-    def required_players(cls, opts: dict) -> int:
-        # Bez botów samotny gracz nie miałby z kim grać.
-        return 1 if opts.get("tiles") else 2
-
     def start(self) -> None:
         humans = list(self.roster)
         self.rng.shuffle(humans)

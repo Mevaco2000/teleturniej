@@ -7,3 +7,4 @@ data/music/*
 !data/music/.gitkeep
 *.pem
 zrzuty/
+README.md

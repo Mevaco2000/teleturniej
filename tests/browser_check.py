@@ -4,7 +4,7 @@ Testy logiki nie wykryją błędów interfejsu, np. przycisku, który nic nie ro
 
     python tests/browser_check.py FOLDER_NA_ZRZUTY [gry] [--real-music]
 
-gry: oot,mil,fam,floor,mel (domyślnie wszystkie). --real-music gra utwory z iTunes (wymaga internetu).
+gry: oot,mil,fam,floor,mel (domyślnie wszystkie). --real-music gra wersje instrumentalne hitów z Deezer (wymaga internetu).
 Używa Edge lub Chrome zainstalowanego w systemie.
 """
 from __future__ import annotations
@@ -219,7 +219,7 @@ def check_audio(tv, real_music):
 
 
 def play_melody(tv, phones, host, real_music):
-    start_game(host, "Jaka to melodia", ["Hity + moje MP3" if real_music else "Melodie wbudowane", "6"])
+    start_game(host, "Jaka to melodia", ["Hity bez śpiewu" if real_music else "Melodie wbudowane", "6"])
     tv.locator(".eq.playing").wait_for(timeout=45000)
     time.sleep(0.6)
     shot(tv, "mel_1_play")

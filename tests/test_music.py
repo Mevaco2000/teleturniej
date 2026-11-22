@@ -1,4 +1,4 @@
-"""Dopasowanie wyników iTunes i dobór utworów, bez sieci."""
+"""Dopasowanie wyników iTunes i Deezer oraz dobór utworów, bez sieci."""
 import asyncio
 import random
 from pathlib import Path
@@ -8,13 +8,18 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestServer
 
-from server.music import MAX_DOWNLOAD, MusicLibrary, normalize, pick_itunes_result
+from server.music import MAX_DOWNLOAD, MusicLibrary, Track, normalize, pick_instrumental, pick_itunes_result
 
 DATA = Path(__file__).resolve().parent.parent / "data"
 
 
 def result(artist, track, album="Album", preview="https://x/a.m4a"):
     return {"artistName": artist, "trackName": track, "collectionName": album, "previewUrl": preview}
+
+
+def deezer(artist, title, album="Album", preview="https://x/a.mp3", rank=0, track_id=1):
+    return {"id": track_id, "title": title, "artist": {"name": artist}, "album": {"title": album},
+            "preview": preview, "rank": rank}
 
 
 def test_normalize_handles_polish_letters():
@@ -68,6 +73,52 @@ def test_ignores_results_without_preview():
 def test_title_containing_rejected_word_is_allowed_when_it_is_the_real_title():
     live = result("Foo", "Live Forever")
     assert pick_itunes_result([live], "Foo", "Live Forever") is live
+
+
+def test_instrumental_needs_mention_of_the_original_artist():
+    # Inna piosenka o tym samym tytule nie może wejść do gry.
+    other = deezer("Country Band", "Whisky (Instrumental)", "Cowboy Instrumentals")
+    assert pick_instrumental([other], "Dżem", "Whisky") is None
+    cover = deezer("Sing Society", "Africa (Karaoke Version Originally Performed by Toto)", "The Best of Karaoke")
+    assert pick_instrumental([cover], "Toto", "Africa") is cover
+    album = deezer("Ameritz Karaoke Band", "Karaoke - Bohemian Rhapsody", "Karaoke - Queen")
+    assert pick_instrumental([album], "Queen", "Bohemian Rhapsody") is album
+
+
+def test_instrumental_rejects_sung_versions_and_originals():
+    sung = deezer("Easy Karaoke Players",
+                  "The Final Countdown (Instrumental Track With Background Vocals)[Karaoke in the style of Europe]")
+    original = deezer("Europe", "The Final Countdown", "The Final Countdown (Expanded Edition)")
+    assert pick_instrumental([sung, original], "Europe", "The Final Countdown") is None
+
+
+def test_instrumental_title_word_does_not_count_as_marker():
+    original = deezer("Billy Joel", "Piano Man", "Piano Man")
+    assert pick_instrumental([original], "Billy Joel", "Piano Man") is None
+    cover = deezer("Piano Dreamers", "Piano Man (Instrumental)", "Piano Dreamers Cover Billy Joel")
+    assert pick_instrumental([original, cover], "Billy Joel", "Piano Man") is cover
+
+
+def test_instrumental_prefers_played_melody_over_restyled_versions():
+    lullaby = deezer("Rockabye Baby!", "Hey Jude (Instrumental)", "Lullaby Renditions of The Beatles", rank=900_000)
+    karaoke = deezer("Zoom Karaoke", "Hey Jude (Karaoke Version) [Originally Performed By The Beatles]")
+    piano = deezer("Matchstick Piano Man", "Hey Jude (Instrumental Piano)", "The Beatles (Instrumental Piano Covers)")
+    assert pick_instrumental([lullaby, karaoke, piano], "The Beatles", "Hey Jude") is piano
+    assert pick_instrumental([lullaby, karaoke], "The Beatles", "Hey Jude") is karaoke
+
+
+def test_instrumental_accepts_official_instrumental_and_reordered_title():
+    official = deezer("a-ha", "Take on Me (Instrumental; 2015 Remaster)", "Hunting High and Low")
+    assert pick_instrumental([official], "a-ha", "Take On Me") is official
+    stones = deezer("Hit The Button Karaoke", "Satisfaction (I Can't Get No) [Karaoke Instrumental]",
+                    "Karaoke: The Rolling Stones")
+    assert pick_instrumental([stones], "The Rolling Stones", "(I Can't Get No) Satisfaction") is stones
+
+
+def test_instrumental_skips_medleys_and_missing_previews():
+    medley = deezer("Karaoke Band", "Queen Medley (Instrumental)", "Karaoke - Queen")
+    silent = deezer("Karaoke Band", "Bohemian Rhapsody (Instrumental)", "Karaoke - Queen", preview="")
+    assert pick_instrumental([medley, silent], "Queen", "Bohemian Rhapsody") is None
 
 
 @pytest.fixture
@@ -141,6 +192,70 @@ def test_offline_auto_mode_falls_back_to_builtin(library, monkeypatch):
     monkeypatch.setattr(library, "_resolve_hit", no_network)
     tracks = asyncio.run(library.prepare(4, "all", "auto"))
     assert len(tracks) == 4 and all(t.kind == "synth" for t in tracks)
+
+
+def test_instrumental_mode_tops_up_with_originals_then_builtin(library, monkeypatch):
+    def fake(kind, limit):
+        found = []
+
+        async def resolve(client, song):
+            if len(found) >= limit:
+                return None
+            found.append(song)
+            return Track(f'{kind}{len(found)}', song["title"], song["artist"], kind, path=Path("x"), lang=song["lang"])
+
+        return resolve
+
+    monkeypatch.setattr(library, "_resolve_instrumental", fake("instr", 3))
+    monkeypatch.setattr(library, "_resolve_hit", fake("hit", 1))
+    tracks = asyncio.run(library.prepare(6, "all", "instr"))
+    kinds = sorted(t.kind for t in tracks)
+    assert kinds == ["hit", "instr", "instr", "instr", "synth", "synth"]
+    instrumental = {(t.artist, t.title) for t in tracks if t.kind == "instr"}
+    assert not [t for t in tracks if t.kind == "hit" and (t.artist, t.title) in instrumental]
+
+
+def test_instrumental_mode_ignores_own_files(library, monkeypatch):
+    (library.music_dir / "Kult - Arahja.mp3").write_bytes(b"x")
+
+    async def offline(client, song):
+        return None
+
+    monkeypatch.setattr(library, "_resolve_instrumental", offline)
+    monkeypatch.setattr(library, "_resolve_hit", offline)
+    tracks = asyncio.run(library.prepare(3, "all", "instr"))
+    assert all(t.kind == "synth" for t in tracks)
+
+
+def fake_deezer(library, monkeypatch, response):
+    queries = []
+
+    async def call(client, path, params=None):
+        queries.append((path, (params or {}).get("q", "")))
+        return response
+
+    monkeypatch.setattr(library, "_deezer", call)
+    return queries
+
+
+def test_pinned_instrumental_is_used_without_searching(library, monkeypatch):
+    queries = fake_deezer(library, monkeypatch, {"data": []})
+    song = {"artist": "Lady Pank", "title": "Kryzysowa narzeczona", "instr": 71045148}
+    meta = asyncio.run(library._lookup_instrumental(None, song))
+    assert meta["deezer"] == 71045148
+    assert not [q for _, q in queries if "instrumental" in q or "karaoke" in q]
+
+
+def test_instrumental_search_miss_is_remembered_but_network_failure_is_not(library, monkeypatch):
+    fake_deezer(library, monkeypatch, None)
+    assert asyncio.run(library._lookup_instrumental(None, {"artist": "Nikt", "title": "Cisza"})) is None
+    assert library.meta == {}
+    queries = fake_deezer(library, monkeypatch, {"data": []})
+    assert asyncio.run(library._lookup_instrumental(None, {"artist": "Nikt", "title": "Cisza"})) is None
+    assert [m for m in library.meta.values() if "missed_at" in m]
+    searched = len(queries)
+    asyncio.run(library._lookup_instrumental(None, {"artist": "Nikt", "title": "Cisza"}))
+    assert len(queries) == searched, "nieudane wyszukiwanie powtarza się dopiero po tygodniu"
 
 
 def test_options_contain_correct_answer_once(library):

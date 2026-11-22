@@ -25,7 +25,8 @@ class Familiada(Game):
     id = "familiada"
     title = "Familiada"
     tagline = "Drużyny kontra to, co odpowiedzieli ankietowani."
-    min_players = 2
+    # Jedna osoba gra sama w drużynie Czerwonych: bez pojedynku z rywalem i bez przejęcia.
+    min_players = 1
     rules = [
         "Dwie drużyny zgadują najpopularniejsze odpowiedzi z ankiety (punkty są szacunkowe).",
         "Pojedynek: po jednej osobie z drużyny. Kto trafi wyżej na tablicy, przejmuje pytanie dla drużyny.",
@@ -103,7 +104,7 @@ class Familiada(Game):
         self.set_timer(ROUND_INTRO_SECONDS, self._start_duel)
 
     def _start_duel(self) -> None:
-        self.duelists = [self._next_member(0), self._next_member(1)]
+        self.duelists = [self._next_member(t) for t in (0, 1) if self.teams[t]]
         self.first_rank = None
         self.answerer = None
         self.mode = "duel_buzz"
@@ -154,11 +155,11 @@ class Familiada(Game):
         self.set_timer(AFTER_PICK_SECONDS, lambda: handler(rank))
 
     def _after_duel_first(self, rank: Optional[int]) -> None:
-        if rank == 0:
+        other = next((p for p in self.duelists if self._team_of(p) != self.first_team), None)
+        if rank == 0 or other is None:
             self._start_play(self.first_team)
             return
         self.first_rank = rank
-        other = next(p for p in self.duelists if self._team_of(p) != self.first_team)
         self._prompt(other, "duel_second")
 
     def _after_duel_second(self, rank: Optional[int]) -> None:
@@ -186,6 +187,9 @@ class Familiada(Game):
 
     def _after_play(self, rank: Optional[int]) -> None:
         if self._all_revealed():
+            self._round_won(self.control)
+        elif self.strikes >= 3 and not self.teams[1 - self.control]:
+            # Nie ma kto przejąć pytania, więc runda kończy się jak po nieudanym przejęciu.
             self._round_won(self.control)
         elif self.strikes >= 3:
             self._prompt(self._next_member(1 - self.control), "steal")
@@ -216,7 +220,7 @@ class Familiada(Game):
 
     def _finish(self) -> None:
         ranking = []
-        for team in sorted((0, 1), key=lambda t: -self.scores[t]):
+        for team in sorted((t for t in (0, 1) if self.teams[t]), key=lambda t: -self.scores[t]):
             names = ", ".join(self.name(p) for p in self.teams[team])
             ranking.append({
                 "name": TEAM_NAMES[team], "color": TEAM_COLORS[team], "score": self.scores[team],

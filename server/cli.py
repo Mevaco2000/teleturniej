@@ -141,8 +141,9 @@ def main(argv=None) -> None:
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     if args.prefetch_music:
         library = MusicLibrary(ROOT / "data", ROOT / "data" / "cache", random.Random())
-        ok, total = asyncio.run(library.prefetch_all())
-        print(f"Gotowe: {ok} z {total} utworów dostępnych bez internetu.")
+        hits, instrumentals, total = asyncio.run(library.prefetch_all())
+        print(f"Gotowe. Bez internetu dostępne są {hits} z {total} utworów ze śpiewem "
+              f"i {instrumentals} z {total} w wersji instrumentalnej.")
         return
     addresses = [] if args.cloud else lan_addresses()
     ip = args.ip or (addresses[0] if addresses else "127.0.0.1")

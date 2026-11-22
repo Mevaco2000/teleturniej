@@ -69,7 +69,7 @@ def press_random_control(table: Table, pid: str, rng: random.Random) -> None:
 
 
 @pytest.mark.parametrize("game_id", list(GAMES))
-@pytest.mark.parametrize("players", [2, 3, 5, 10])
+@pytest.mark.parametrize("players", [1, 2, 3, 5, 10])
 def test_game_finishes_when_nobody_touches_the_phone(game_id, players):
     """Każdy etap ma limit czasu, więc porzucone telefony nie mogą zawiesić gry."""
     table = Table(seed=players)
@@ -96,6 +96,27 @@ def test_game_survives_random_players(game_id, seed):
     run_until_results(table, tick)
     assert table.session.game is not None, table.session.notice
     assert table.session.notice is None
+
+
+@pytest.mark.parametrize("game_id", list(GAMES))
+@pytest.mark.parametrize("seed", range(6))
+def test_solo_game_survives_random_clicks(game_id, seed):
+    """Każdą grę da się przejść w pojedynkę, np. żeby ją przetestować."""
+    table = Table(seed=seed)
+    pid = table.add_players(1)[0]
+    rng = random.Random(seed)
+    table.start(game_id, **options_for(game_id))
+    assert table.session.game is not None, table.session.notice
+
+    def tick():
+        tv_ack_audio(table)
+        if rng.random() < 0.8:
+            press_random_control(table, pid, rng)
+
+    run_until_results(table, tick)
+    assert table.session.notice is None
+    ranking = table.session.game.ranking
+    assert any(r.get("id") == pid or pid in r.get("members", []) for r in ranking)
 
 
 @pytest.mark.parametrize("game_id", list(GAMES))
@@ -224,6 +245,29 @@ def test_one_of_ten_final_self_take_gives_double_points():
     table.act(pid, "self_take")
     table.act(pid, "answer", game.q.correct)
     assert game.points[pid] == 30
+
+
+def test_one_of_ten_solo_final_lasts_until_lives_run_out():
+    table = Table(seed=4)
+    pid = table.add_players(1)[0]
+    table.start("one_of_ten")
+    game = table.session.game
+    advance_until(table, lambda: game.round == 3 and game.screen == "buzz")
+    table.act(pid, "buzz")
+    table.act(pid, "answer", game.q.correct)
+    table.clock.advance(4)
+    assert game.screen == "choice"
+    assert all(b["type"] != "buttons" or b["items"][0]["action"] == "self_take" for b in table.view(pid)["blocks"])
+
+    def answer_wrong():
+        if game.screen == "buzz":
+            table.act(pid, "buzz")
+        elif game.screen == "ask":
+            table.act(pid, "answer", (game.q.correct + 1) % 4)
+
+    advance_until(table, lambda: game.screen == "results", answer_wrong)
+    assert game.lives[pid] == 0
+    assert game.points[pid] == 10
 
 
 # --- Milionerzy ------------------------------------------------------------
@@ -524,6 +568,26 @@ def test_familiada_board_is_hidden_from_tv_until_revealed():
     assert all(row["label"] is None and row["points"] is None for row in board)
 
 
+def test_familiada_solo_plays_without_rivals():
+    table = Table()
+    pid = table.add_players(1)[0]
+    table.start("familiada")
+    game = table.session.game
+    assert game.teams == [[pid], []]
+    advance_until(table, lambda: game.screen == "duel_buzz")
+    assert game.duelists == [pid]
+    table.act(pid, "buzz")
+    table.act(pid, "pick", choice_index(game, game.answers[2][0]))
+    table.clock.advance(3)
+    assert game.mode == "play" and game.control == 0
+    for decoy in list(game.question["decoys"])[:3]:
+        to_answer(table, game)
+        table.act(pid, "pick", choice_index(game, decoy))
+    table.clock.advance(3)
+    assert game.screen == "round_end" and game.round_winner == 0
+    assert game.scores[0] == game.answers[2][1] * game.multiplier
+
+
 def test_familiada_teams_are_balanced():
     table = Table()
     table.add_players(7)
@@ -623,11 +687,14 @@ def test_floor_only_neighbours_can_be_challenged():
     assert game.screen == "duel_intro"
 
 
-def test_floor_solo_player_needs_bots():
+def test_floor_solo_player_gets_bots():
     table = Table()
     table.add_players(1)
     table.start("floor", tiles=0)
-    assert table.session.game is None
+    game = table.session.game
+    assert len(game.owners) == 2
+    assert sum(o.bot for o in game.owners.values()) == 1
+    table.act(table.session.host_id, "end_game")
     table.start("floor", tiles=6)
     game = table.session.game
     assert len(game.owners) == 6

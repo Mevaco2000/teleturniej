@@ -49,7 +49,7 @@ Odświeżenie strony lub chwilowe wyłączenie telefonu czy telewizora nie przer
 
 - **Usypianie.** Serwer usypia, gdy przez 15 minut nie jest otwarty żaden ekran gry, a pierwsze otwarcie po przerwie trwa do minuty. Otwarty ekran TV co minutę daje znać, że gra trwa, więc w jej trakcie serwer nie zaśnie.
 - **Restart kasuje trwające gry.** Dzieje się tak po uśpieniu i po każdej aktualizacji. Telewizor sam założy wtedy nową grę z nowym kodem.
-- **Muzyka.** W „Jaka to melodia” działają fragmenty z iTunes i melodie wbudowane. Własne pliki MP3 działają tylko w grze na laptopie.
+- **Muzyka.** W „Jaka to melodia” działają hity bez śpiewu (Deezer), hity ze śpiewem (iTunes) i melodie wbudowane. Własne pliki MP3 działają tylko w grze na laptopie.
 - **Limit czasu.** Render daje 750 godzin pracy miesięcznie, czyli wystarczy na jedną usługę działającą bez przerwy.
 
 Gdyby Render przestał być darmowy, załączony `Dockerfile` uruchamia ten sam serwer na innym hostingu z kontenerami.
@@ -85,15 +85,21 @@ Najczęstszą przyczyną jest zapora Windows. Serwer ostrzega przy starcie, jeś
 
 | Źródło | Skąd | Internet |
 | --- | --- | --- |
-| Hity + moje MP3 | 30-sekundowe fragmenty z iTunes oraz pliki z `data/music` | na laptopie, przy pierwszym użyciu utworu |
+| Hity bez śpiewu (domyślnie) | 30-sekundowe fragmenty wersji instrumentalnych z Deezer | na laptopie, przy pierwszym użyciu utworu |
+| Hity ze śpiewem + moje MP3 | 30-sekundowe fragmenty oryginałów z iTunes oraz pliki z `data/music` | na laptopie, przy pierwszym użyciu utworu |
 | Tylko moje MP3 | pliki z `data/music` | nie |
 | Melodie wbudowane | melodie klasyczne i tradycyjne grane przez syntezator | nie |
 
 Bez internetu i bez własnych plików gra sama przechodzi na melodie wbudowane.
 
+**Hity bez śpiewu** grają jak orkiestra w telewizyjnym teleturnieju: słychać melodię, ale nie słowa.
+- Zagraniczne hity mają w Deezer wiele wersji fortepianowych, karaoke i instrumentalnych. Gra wybiera tę, która wymienia oryginalnego wykonawcę (np. „Originally Performed by Queen”), bez chórków. Najchętniej bierze wersję, w której melodię gra instrument.
+- Polskie przeboje pochodzą z albumów z instrumentalnymi wersjami (np. Ryszard Szwec Band, Marek Dutkiewicz, KOMBI Łosowski). Ich tytuły nie wymieniają wykonawcy, więc w `data/songs.json` utwór ma wskazany numer nagrania w Deezer (pole `instr`).
+- Gdy w wybranej kategorii zabraknie wersji instrumentalnych, gra dopełnia ją oryginałami z tej samej kategorii.
+
 - **Własne utwory:** wrzuć pliki `.mp3`, `.m4a`, `.ogg`, `.aac` lub `.wav` do `data/music`. Nazwij je `Wykonawca - Tytuł.mp3`, bo z nazwy powstaje odpowiedź w grze. Gra startuje od 30. sekundy utworu.
-- **Gra bez internetu:** `.\start.bat --prefetch-music` pobierze z góry fragmenty całego katalogu do `data/cache` (kilka minut, ok. 100 MB).
-- **Własny katalog:** utwory do wyszukania są w `data/songs.json`.
+- **Gra bez internetu:** `.\start.bat --prefetch-music` pobierze z góry fragmenty całego katalogu, oryginały i wersje instrumentalne, do `data/cache` (kilkanaście minut, ok. 250 MB).
+- **Własny katalog:** utwory do wyszukania są w `data/songs.json`. Nowy zagraniczny hit nie potrzebuje pola `instr`, bo gra sama znajdzie wersję instrumentalną.
 
 Pobrane fragmenty należą do ich właścicieli i są przeznaczone wyłącznie do prywatnej zabawy.
 

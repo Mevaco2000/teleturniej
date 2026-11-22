@@ -18,7 +18,7 @@ class OneOfTen(Game):
     id = "one_of_ten"
     title = "1 z 10"
     tagline = "Trzy szanse. Jeden zwycięzca."
-    min_players = 2
+    min_players = 1
     rules = [
         "Każdy ma trzy szanse. Zła odpowiedź zabiera jedną.",
         "Runda 1: każdy dostaje po dwa pytania.",
@@ -149,7 +149,9 @@ class OneOfTen(Game):
         self.set_timer(4, self._start_buzz)
 
     def _final_over(self) -> bool:
-        return len(self._alive()) <= 1 or self.final_asked >= FINAL_LIMIT
+        # W pojedynkę finał trwa, dopóki gracz ma szanse; z rywalami do ostatniego na placu.
+        needed = 2 if len(self.finalists) > 1 else 1
+        return len(self._alive()) < needed or self.final_asked >= FINAL_LIMIT
 
     def _start_buzz(self) -> None:
         if self._final_over():
@@ -188,7 +190,11 @@ class OneOfTen(Game):
         self.set_timer(PICK_SECONDS, self._choice_timeout)
 
     def _choice_timeout(self) -> None:
-        self._point_at(self.rng.choice([p for p in self._alive() if p != self.picker]))
+        targets = [p for p in self._alive() if p != self.picker]
+        if targets:
+            self._point_at(self.rng.choice(targets))
+        else:
+            self._start_buzz()
 
     def _point_at(self, target: str) -> None:
         self.pointer = self.picker
@@ -278,9 +284,11 @@ class OneOfTen(Game):
             return self.pv(msg("Wskaż, kto odpowiada."), self._target_buttons(pid), sub=sub,
                            timer=self.timer_view())
         if self.screen == "choice" and pid == self.picker:
-            return self.pv(msg("Dobra odpowiedź! Co dalej?"),
-                           buttons(btn("self_take", "Biorę na siebie (+20)", style="primary")),
-                           self._target_buttons(pid), sub=sub, timer=self.timer_view())
+            blocks = [msg("Dobra odpowiedź! Co dalej?"),
+                      buttons(btn("self_take", "Biorę na siebie (+20)", style="primary"))]
+            if any(t != pid for t in self._alive()):
+                blocks.append(self._target_buttons(pid))
+            return self.pv(*blocks, sub=sub, timer=self.timer_view())
         if self.screen == "buzz" and pid in self._alive():
             return self.pv(buzz(), sub=sub, prompt=self.q.text, timer=self.timer_view())
         if self.screen == "reveal" and pid == self.answerer and self.result:

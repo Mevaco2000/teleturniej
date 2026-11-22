@@ -24,6 +24,7 @@ class Melody(Game):
     needs_tv = True
     rules = [
         "Muzyka gra na telewizorze. Znasz utwór? Zgłoś się na telefonie.",
+        "Domyślnie hity grają bez śpiewu, w wersjach instrumentalnych. Rozpoznaj je po melodii.",
         "Kto zgłosi się pierwszy, wybiera tytuł spośród czterech. Im szybciej, tym więcej punktów.",
         "Zła odpowiedź blokuje Cię na ten utwór, a muzyka gra dalej dla pozostałych.",
         "Licytacja: tajnie deklarujesz, ile sekund potrzebujesz. Najniższa oferta gra i odpowiada.",
@@ -37,9 +38,9 @@ class Melody(Game):
         {"key": "count", "label": "Liczba utworów", "default": 9, "choices": [
             {"v": 6, "l": "6"}, {"v": 9, "l": "9"}, {"v": 12, "l": "12"}, {"v": 15, "l": "15"},
         ]},
-        {"key": "source", "label": "Źródło", "default": "auto", "choices": [
-            {"v": "auto", "l": "Hity + moje MP3"}, {"v": "own", "l": "Tylko moje MP3"},
-            {"v": "builtin", "l": "Melodie wbudowane"},
+        {"key": "source", "label": "Źródło", "default": "instr", "choices": [
+            {"v": "instr", "l": "Hity bez śpiewu"}, {"v": "auto", "l": "Hity ze śpiewem + moje MP3"},
+            {"v": "own", "l": "Tylko moje MP3"}, {"v": "builtin", "l": "Melodie wbudowane"},
         ]},
     ]
 

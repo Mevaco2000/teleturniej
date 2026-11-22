@@ -65,8 +65,12 @@ def test_songs_are_well_formed():
     for song in songs:
         assert song["lang"] in ("pl", "en")
         assert song["decade"] in ("old", "80", "90", "00", "10", "20")
+        assert isinstance(song.get("instr", 1), int) and song.get("instr", 1) > 0, song
     for category in ("old", "80", "90", "00", "10", "20"):
         assert sum(s["decade"] == category for s in songs) >= 6, category
+    # Polskie wersje instrumentalne pochodzą z albumów, których wyszukiwarka nie dopasuje.
+    assert sum("instr" in s for s in songs if s["lang"] == "pl") >= 40
+    assert len({s["instr"] for s in songs if "instr" in s}) == sum("instr" in s for s in songs)
 
 
 def test_melodies_use_valid_notes():
