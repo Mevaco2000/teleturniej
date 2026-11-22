@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <title>Teleturniej</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="theme-color" content="#0b1020">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Teleturniej">
+  <link rel="manifest" href="/app/manifest.webmanifest">
+  <link rel="icon" href="/app/icons/icon-192.png">
+  <link rel="apple-touch-icon" href="/app/icons/icon-192.png">
+  <link rel="stylesheet" href="/shared/fonts.css">
+  <link rel="stylesheet" href="/app/app.css">
+</head>
+<body>
+  <div id="offline" class="offline" hidden>Łączenie z grą…</div>
+
+  <form id="join" class="join" hidden autocomplete="off">
+    <h1>Teleturniej</h1>
+    <p>Dołączasz do gry na telewizorze.</p>
+    <label for="room">Kod gry z telewizora</label>
+    <input id="room" class="code-input" maxlength="4" autocapitalize="characters" autocomplete="off" autocorrect="off" spellcheck="false" enterkeyhint="next" placeholder="ABCD">
+    <label for="name">Jak masz na imię?</label>
+    <input id="name" maxlength="16" autocapitalize="words" autocomplete="off" enterkeyhint="go" placeholder="Twoje imię">
+    <p id="join-error" class="error" hidden></p>
+    <button type="submit" class="btn primary">Dołączam</button>
+  </form>
+
+  <div id="root" class="root"></div>
+
+  <script src="/shared/core.js"></script>
+  <script src="/app/app.js"></script>
+</body>
+</html>

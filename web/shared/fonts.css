@@ -1,0 +1,67 @@
+@font-face {
+  font-family: "Barlow";
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+  src: url("/shared/fonts/barlow-latin-500-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Barlow";
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+  src: url("/shared/fonts/barlow-latin-ext-500-normal.woff2") format("woff2");
+  unicode-range: U+0100-02AF,U+1E00-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+
+@font-face {
+  font-family: "Barlow";
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+  src: url("/shared/fonts/barlow-latin-700-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Barlow";
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+  src: url("/shared/fonts/barlow-latin-ext-700-normal.woff2") format("woff2");
+  unicode-range: U+0100-02AF,U+1E00-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+
+@font-face {
+  font-family: "Barlow Condensed";
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+  src: url("/shared/fonts/barlow-condensed-latin-600-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Barlow Condensed";
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+  src: url("/shared/fonts/barlow-condensed-latin-ext-600-normal.woff2") format("woff2");
+  unicode-range: U+0100-02AF,U+1E00-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+
+@font-face {
+  font-family: "Barlow Condensed";
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+  src: url("/shared/fonts/barlow-condensed-latin-800-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Barlow Condensed";
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+  src: url("/shared/fonts/barlow-condensed-latin-ext-800-normal.woff2") format("woff2");
+  unicode-range: U+0100-02AF,U+1E00-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
