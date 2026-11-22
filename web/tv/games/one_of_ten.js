@@ -20,6 +20,19 @@
     return html + "</div>";
   }
 
+  /* Odpowiedź z głowy: co powiedział gracz i jaka była poprawna. */
+  function freeReveal(g) {
+    var r = g.result || {};
+    var said = "";
+    if (r.said) {
+      said = '<div class="said ' + (r.correct ? "good" : "bad") + '">' + esc(g.answerer ? g.answerer.name : "") + ": „" + esc(r.said) + "”" +
+        (r.accepted ? " · uznane przez gospodarza" : "") + "</div>";
+    } else if (r.correct === false) {
+      said = '<div class="said bad">Czas minął</div>';
+    }
+    return '<div class="free-answer' + (r.correct ? " correct" : "") + '"><span>Poprawna odpowiedź</span><b>' + esc(g.q.answer) + "</b></div>" + said;
+  }
+
   TV.games.one_of_ten = function (g) {
     var main = "";
     if (g.screen === "round") {
@@ -33,13 +46,13 @@
       var heading = g.screen === "buzz" ? "Kto pierwszy? Zgłaszajcie się na telefonach!" :
         g.answerer ? esc(g.answerer.name) + (g.value === 20 ? " odpowiada za 20 punktów" : " odpowiada") : "Nikt się nie zgłosił";
       main = '<div class="who-line">' + heading + "</div>" +
-        '<div class="q-card ' + TV.sizeClass(g.q.text) + '">' + esc(g.q.text) + "</div>" +
-        (g.screen === "buzz" ? "" : Core.timerBar(g.timer));
+        '<div class="q-card ' + TV.sizeClass(g.q.text) + '">' + esc(g.q.text) + "</div>" + Core.timerBar(g.timer);
       if (g.q.options) {
         main += TV.answersGrid(g.q.options, g.q.correct, g.result ? g.result.chosen : null);
-      } else {
-        main += Core.timerBar(g.timer);
+      } else if (g.q.free && g.screen === "ask") {
+        main += '<div class="say-note">Odpowiedź z głowy: mów do telefonu albo wpisz</div>';
       }
+      if (g.screen === "reveal" && g.q.answer) main += freeReveal(g);
       if (g.screen === "reveal" && g.result && g.result.correct === null) {
         main += '<div class="reveal-note">Nikt się nie zgłosił.</div>';
       }

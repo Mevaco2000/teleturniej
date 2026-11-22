@@ -15,8 +15,23 @@ from .conftest import Table
 MAX_EVENTS = 40_000
 
 
-def options_for(game_id: str) -> dict:
-    return {"melody": {"source": "builtin", "count": 6}}.get(game_id, {})
+def options_for(game_id: str, voice: bool = True) -> dict:
+    opts = dict({"melody": {"source": "builtin", "count": 6}}.get(game_id, {}))
+    if any(d["key"] == "answers" for d in GAMES[game_id].option_defs):
+        opts["answers"] = "voice" if voice else "choice"
+    if game_id == "millionaires":
+        # Ten sam przełącznik obejmuje oba tryby Milionerów.
+        opts["mode"] = "all" if voice else "seat"
+    if game_id == "tournament":
+        # Pełny turniej z muzyką wymaga sieci, więc testy losowe grają wersję skróconą.
+        opts["games"] = "quick"
+        opts["tips"] = "on" if voice else "off"
+    return opts
+
+
+# Co gracze mówią do telefonu w testach losowych: trafienia, pudła, szum i śmieci.
+RANDOM_SPEECH = ["Warszawa", "Kraków", "w Warszawie", "1410", "tysiąc", "pas", "nie wiem", "yyy", "",
+                 "Paryż", "krem", "telefon", "Bohemian Rhapsody", "Oda do radości", "x" * 400, "🎵", "Polska"]
 
 
 def run_until_results(table: Table, tick=lambda: None) -> None:
@@ -63,9 +78,26 @@ def press_random_control(table: Table, pid: str, rng: random.Random) -> None:
         elif block["type"] == "buttons":
             actions += [(item["action"], item["v"]) for item in block["items"]
                         if not item["disabled"] and item["action"] != "end_game"]
+        elif block["type"] == "answer":
+            actions += [(block["action"], rng.choice(RANDOM_SPEECH)) for _ in range(3)]
+            actions.append((block["action"], speak_correctly(table)))
     if actions:
         action, value = rng.choice(actions)
-        table.act(pid, action, value)
+        table.act(pid, action, value, alts=[rng.choice(RANDOM_SPEECH)])
+
+
+def speak_correctly(table: Table) -> str:
+    """Poprawna odpowiedź na bieżące pytanie, żeby testy losowe docierały też do dalszych etapów."""
+    game = table.session.game
+    if getattr(game, "q", None) is not None:
+        return game.q.answer
+    if getattr(game, "card", None):
+        return game.card["answer"]
+    if getattr(game, "track", None) is not None and game.id == "melody":
+        return game.track.title
+    if getattr(game, "answers", None):
+        return game.rng.choice(game.answers)[0]
+    return "Warszawa"
 
 
 @pytest.mark.parametrize("game_id", list(GAMES))
@@ -74,7 +106,7 @@ def test_game_finishes_when_nobody_touches_the_phone(game_id, players):
     """Każdy etap ma limit czasu, więc porzucone telefony nie mogą zawiesić gry."""
     table = Table(seed=players)
     table.add_players(players)
-    table.start(game_id, **options_for(game_id))
+    table.start(game_id, **options_for(game_id, voice=players % 2 == 1))
     run_until_results(table, lambda: tv_ack_audio(table))
     assert table.session.game.ranking
 
@@ -86,7 +118,7 @@ def test_game_survives_random_players(game_id, seed):
     table = Table(seed=seed)
     pids = table.add_players(2 + seed)
     rng = random.Random(seed)
-    table.start(game_id, **options_for(game_id))
+    table.start(game_id, **options_for(game_id, voice=seed % 2 == 0))
 
     def tick():
         tv_ack_audio(table)
@@ -105,7 +137,7 @@ def test_solo_game_survives_random_clicks(game_id, seed):
     table = Table(seed=seed)
     pid = table.add_players(1)[0]
     rng = random.Random(seed)
-    table.start(game_id, **options_for(game_id))
+    table.start(game_id, **options_for(game_id, voice=seed % 2 == 0))
     assert table.session.game is not None, table.session.notice
 
     def tick():
@@ -138,12 +170,14 @@ def test_malformed_actions_are_ignored(game_id):
     table = Table(seed=9)
     pids = table.add_players(3)
     table.start(game_id, **options_for(game_id))
-    junk = [None, -1, 99, "x", [], {}, [1], {"a": 1}, 1.5, True]
-    for _ in range(40):
+    junk = [None, -1, 99, "x", [], {}, [1], {"a": 1}, 1.5, True, "y" * 5000]
+    for step in range(40):
         tv_ack_audio(table)
         for action in ("answer", "buzz", "lifeline", "select", "confirm", "point", "self_take", "challenge",
-                       "pick", "bid", "vote", "qualify", "friend_answer", "pick_friend", "pass", "nonsense"):
-            table.act(pids[0], action, random.Random(action).choice(junk))
+                       "pick", "bid", "vote", "qualify", "friend_answer", "pick_friend", "pass", "nonsense",
+                       "say", "accept"):
+            rng = random.Random(f"{action}{step}")
+            table.act(pids[0], action, rng.choice(junk), alts=rng.choice(junk))
         table.clock.run_next()
     assert table.session.notice is None
 
@@ -154,7 +188,7 @@ def test_malformed_actions_are_ignored(game_id):
 def test_phones_never_receive_the_right_answer_before_reveal():
     table = Table(seed=4)
     pids = table.add_players(4)
-    table.start("millionaires")
+    table.start("millionaires", mode="seat")
     for _ in range(300):
         game = table.session.game
         if game.screen == "results":
@@ -171,7 +205,7 @@ def test_phones_never_receive_the_right_answer_before_reveal():
 def test_melody_title_is_hidden_until_reveal():
     table = Table(seed=5)
     pid = table.add_players(1)[0]
-    table.start("melody", source="builtin", count=6)
+    table.start("melody", answers="choice", source="builtin", count=6)
     table.clock.advance(4)
     game = table.session.game
     assert game.screen == "cue"
@@ -193,7 +227,7 @@ def test_melody_title_is_hidden_until_reveal():
 def test_one_of_ten_wrong_answer_costs_a_life():
     table = Table()
     table.add_players(2)
-    table.start("one_of_ten")
+    table.start("one_of_ten", answers="choice")
     table.clock.advance(4)
     game = table.session.game
     pid = game.answerer
@@ -205,7 +239,7 @@ def test_one_of_ten_wrong_answer_costs_a_life():
 def test_one_of_ten_only_active_player_can_answer():
     table = Table()
     pids = table.add_players(3)
-    table.start("one_of_ten")
+    table.start("one_of_ten", answers="choice")
     table.clock.advance(4)
     game = table.session.game
     other = next(p for p in pids if p != game.answerer)
@@ -216,7 +250,7 @@ def test_one_of_ten_only_active_player_can_answer():
 def test_one_of_ten_round_two_runs_until_three_remain():
     table = Table(seed=2)
     table.add_players(6)
-    table.start("one_of_ten")
+    table.start("one_of_ten", answers="choice")
     game = table.session.game
     def play_wrong():
         if game.screen == "ask":
@@ -233,7 +267,7 @@ def test_one_of_ten_round_two_runs_until_three_remain():
 def test_one_of_ten_final_self_take_gives_double_points():
     table = Table(seed=2)
     table.add_players(2)
-    table.start("one_of_ten")
+    table.start("one_of_ten", answers="choice")
     game = table.session.game
     advance_until(table, lambda: not (game.round != 3 or game.screen != "buzz"))
     pid = game.finalists[0]
@@ -250,7 +284,7 @@ def test_one_of_ten_final_self_take_gives_double_points():
 def test_one_of_ten_solo_final_lasts_until_lives_run_out():
     table = Table(seed=4)
     pid = table.add_players(1)[0]
-    table.start("one_of_ten")
+    table.start("one_of_ten", answers="choice")
     game = table.session.game
     advance_until(table, lambda: game.round == 3 and game.screen == "buzz")
     table.act(pid, "buzz")
@@ -270,6 +304,29 @@ def test_one_of_ten_solo_final_lasts_until_lives_run_out():
     assert game.points[pid] == 10
 
 
+@pytest.mark.parametrize("level,expected", [
+    ("normal", {1: {1}, 2: {2}, 3: {2, 3}}),
+    ("hard", {1: {2}, 2: {3}, 3: {3, 4}}),
+])
+def test_one_of_ten_question_level_per_round(level, expected):
+    table = Table(seed=6)
+    table.add_players(5)
+    table.start("one_of_ten", answers="choice", level=level)
+    game = table.session.game
+    seen = {1: set(), 2: set(), 3: set()}
+
+    def answer_wrong():
+        if game.screen in ("ask", "buzz") and game.q is not None:
+            seen[game.round].add(game.q.difficulty)
+        if game.screen == "ask":
+            table.act(game.answerer, "answer", (game.q.correct + 1) % 4)
+        elif game.screen == "buzz" and game._alive():
+            table.act(game._alive()[0], "buzz")
+
+    advance_until(table, lambda: game.screen == "results", answer_wrong)
+    assert all(seen[r] and seen[r] <= expected[r] for r in (1, 2, 3)), seen
+
+
 # --- Milionerzy ------------------------------------------------------------
 
 
@@ -286,7 +343,7 @@ def seat_player(table: Table, game) -> str:
 def test_millionaires_fastest_correct_answer_wins_the_seat():
     table = Table()
     a, b, c = table.add_players(3)
-    table.start("millionaires")
+    table.start("millionaires", mode="seat")
     game = table.session.game
     assert game.screen == "qualify"
     wrong = (game.q.correct + 1) % 4
@@ -302,7 +359,7 @@ def test_millionaires_fastest_correct_answer_wins_the_seat():
 def test_millionaires_wrong_answer_falls_to_guaranteed_amount():
     table = Table()
     table.add_players(1)
-    table.start("millionaires")
+    table.start("millionaires", mode="seat")
     game = table.session.game
     hot = seat_player(table, game)
     for level in range(3):
@@ -320,7 +377,7 @@ def test_millionaires_wrong_answer_falls_to_guaranteed_amount():
 def test_millionaires_walk_away_keeps_last_amount():
     table = Table()
     table.add_players(1)
-    table.start("millionaires")
+    table.start("millionaires", mode="seat")
     game = table.session.game
     hot = seat_player(table, game)
     table.act(hot, "select", game.q.correct)
@@ -333,7 +390,7 @@ def test_millionaires_walk_away_keeps_last_amount():
 def test_millionaires_fifty_fifty_keeps_correct_answer_and_works_once():
     table = Table()
     table.add_players(1)
-    table.start("millionaires")
+    table.start("millionaires", mode="seat")
     game = table.session.game
     hot = seat_player(table, game)
     table.act(hot, "lifeline", "fifty")
@@ -348,7 +405,7 @@ def test_millionaires_fifty_fifty_keeps_correct_answer_and_works_once():
 def test_millionaires_real_audience_votes_and_timer_resumes():
     table = Table()
     pids = table.add_players(4)
-    table.start("millionaires")
+    table.start("millionaires", mode="seat")
     game = table.session.game
     hot = seat_player(table, game)
     table.clock.advance(5)
@@ -368,7 +425,7 @@ def test_millionaires_real_audience_votes_and_timer_resumes():
 def test_millionaires_phone_a_friend_shows_question_only_to_friend():
     table = Table()
     pids = table.add_players(3)
-    table.start("millionaires")
+    table.start("millionaires", mode="seat")
     game = table.session.game
     hot = seat_player(table, game)
     table.act(hot, "lifeline", "phone")
@@ -398,7 +455,7 @@ def cue_and_play(table: Table, game) -> None:
 def test_melody_faster_answer_scores_more_and_pauses_music():
     table = Table()
     a, b = table.add_players(2)
-    table.start("melody", source="builtin", count=6)
+    table.start("melody", answers="choice", source="builtin", count=6)
     game = table.session.game
     cue_and_play(table, game)
     assert game.screen == "play" and game.audio["playing"] is True
@@ -418,7 +475,7 @@ def test_melody_faster_answer_scores_more_and_pauses_music():
 def test_melody_wrong_answer_locks_player_and_resumes_clip():
     table = Table()
     a, b = table.add_players(2)
-    table.start("melody", source="builtin", count=6)
+    table.start("melody", answers="choice", source="builtin", count=6)
     game = table.session.game
     cue_and_play(table, game)
     table.clock.advance(5)
@@ -437,7 +494,7 @@ def test_melody_wrong_answer_locks_player_and_resumes_clip():
 def test_melody_lowest_bid_plays_for_that_many_seconds():
     table = Table()
     a, b = table.add_players(2)
-    table.start("melody", source="builtin", count=6)
+    table.start("melody", answers="choice", source="builtin", count=6)
     game = table.session.game
     advance_until(table, lambda: game.screen == "bid", lambda: tv_ack_audio(table))
     table.act(a, "bid", 5)
@@ -456,7 +513,7 @@ def test_melody_lowest_bid_plays_for_that_many_seconds():
 def test_melody_silent_tv_ends_game_with_clear_message():
     table = Table()
     table.add_players(1)
-    table.start("melody", source="builtin", count=6)
+    table.start("melody", answers="choice", source="builtin", count=6)
     for _ in range(200):
         if table.session.game is None:
             break
@@ -469,7 +526,7 @@ def test_melody_cannot_start_without_tv():
     table = Table()
     table.add_players(1)
     table.session.disconnected(table.tv)
-    table.start("melody", source="builtin", count=6)
+    table.start("melody", answers="choice", source="builtin", count=6)
     assert table.session.game is None
     assert "TV" in table.session.notice
 
@@ -488,7 +545,7 @@ def choice_index(game, label: str) -> int:
 def test_familiada_top_answer_in_duel_wins_control():
     table = Table()
     table.add_players(4)
-    table.start("familiada")
+    table.start("familiada", answers="choice")
     game = table.session.game
     advance_until(table, lambda: not (game.screen != "duel_buzz"))
     first = game.duelists[0]
@@ -502,7 +559,7 @@ def test_familiada_top_answer_in_duel_wins_control():
 def test_familiada_higher_answer_wins_duel():
     table = Table()
     table.add_players(4)
-    table.start("familiada")
+    table.start("familiada", answers="choice")
     game = table.session.game
     advance_until(table, lambda: not (game.screen != "duel_buzz"))
     first, second = game.duelists
@@ -518,7 +575,7 @@ def test_familiada_higher_answer_wins_duel():
 def test_familiada_three_strikes_allow_steal_of_the_bank():
     table = Table()
     table.add_players(4)
-    table.start("familiada")
+    table.start("familiada", answers="choice")
     game = table.session.game
     advance_until(table, lambda: not (game.screen != "duel_buzz"))
     first = game.duelists[0]
@@ -546,7 +603,7 @@ def test_familiada_three_strikes_allow_steal_of_the_bank():
 def test_familiada_cannot_pick_the_same_option_twice():
     table = Table()
     table.add_players(2)
-    table.start("familiada")
+    table.start("familiada", answers="choice")
     game = table.session.game
     advance_until(table, lambda: not (game.screen != "duel_buzz"))
     first = game.duelists[0]
@@ -561,7 +618,7 @@ def test_familiada_cannot_pick_the_same_option_twice():
 def test_familiada_board_is_hidden_from_tv_until_revealed():
     table = Table()
     table.add_players(2)
-    table.start("familiada")
+    table.start("familiada", answers="choice")
     game = table.session.game
     advance_until(table, lambda: not (game.screen != "duel_buzz"))
     board = table.tv_view()["board"]
@@ -571,7 +628,7 @@ def test_familiada_board_is_hidden_from_tv_until_revealed():
 def test_familiada_solo_plays_without_rivals():
     table = Table()
     pid = table.add_players(1)[0]
-    table.start("familiada")
+    table.start("familiada", answers="choice")
     game = table.session.game
     assert game.teams == [[pid], []]
     advance_until(table, lambda: game.screen == "duel_buzz")
@@ -591,7 +648,7 @@ def test_familiada_solo_plays_without_rivals():
 def test_familiada_teams_are_balanced():
     table = Table()
     table.add_players(7)
-    table.start("familiada")
+    table.start("familiada", answers="choice")
     game = table.session.game
     assert sorted(len(t) for t in game.teams) == [3, 4]
 
@@ -614,7 +671,7 @@ def to_duel(table: Table, game) -> None:
 def test_floor_chess_clock_only_runs_for_active_player():
     table = Table()
     table.add_players(4)
-    table.start("floor")
+    table.start("floor", answers="choice")
     game = table.session.game
     to_duel(table, game)
     a, b = game.challenger, game.defender
@@ -630,7 +687,7 @@ def test_floor_chess_clock_only_runs_for_active_player():
 def test_floor_wrong_answer_keeps_clock_and_locks_briefly():
     table = Table()
     table.add_players(4)
-    table.start("floor")
+    table.start("floor", answers="choice")
     game = table.session.game
     to_duel(table, game)
     a = game.active
@@ -646,7 +703,7 @@ def test_floor_wrong_answer_keeps_clock_and_locks_briefly():
 def test_floor_defender_winning_inherits_challenger_category():
     table = Table()
     table.add_players(4)
-    table.start("floor")
+    table.start("floor", answers="choice")
     game = table.session.game
     to_duel(table, game)
     challenger, defender = game.challenger, game.defender
@@ -661,7 +718,7 @@ def test_floor_defender_winning_inherits_challenger_category():
 def test_floor_challenger_winning_keeps_own_category():
     table = Table()
     table.add_players(4)
-    table.start("floor")
+    table.start("floor", answers="choice")
     game = table.session.game
     to_duel(table, game)
     challenger, defender = game.challenger, game.defender
@@ -675,7 +732,7 @@ def test_floor_challenger_winning_keeps_own_category():
 def test_floor_only_neighbours_can_be_challenged():
     table = Table()
     table.add_players(1)
-    table.start("floor", tiles=16)
+    table.start("floor", answers="choice", tiles=16)
     game = table.session.game
     advance_until(table, lambda: not (game.screen != "pick"))
     me = game.challenger
@@ -690,12 +747,12 @@ def test_floor_only_neighbours_can_be_challenged():
 def test_floor_solo_player_gets_bots():
     table = Table()
     table.add_players(1)
-    table.start("floor", tiles=0)
+    table.start("floor", answers="choice", tiles=0)
     game = table.session.game
     assert len(game.owners) == 2
     assert sum(o.bot for o in game.owners.values()) == 1
     table.act(table.session.host_id, "end_game")
-    table.start("floor", tiles=6)
+    table.start("floor", answers="choice", tiles=6)
     game = table.session.game
     assert len(game.owners) == 6
     assert sum(o.bot for o in game.owners.values()) == 5
@@ -704,7 +761,7 @@ def test_floor_solo_player_gets_bots():
 def test_floor_bot_answers_during_its_turn():
     table = Table(seed=8)
     table.add_players(1)
-    table.start("floor", tiles=6)
+    table.start("floor", answers="choice", tiles=6)
     game = table.session.game
     to_duel(table, game)
     table.act(game.challenger, "answer", game.card["correct"])
@@ -826,7 +883,7 @@ def test_invalid_option_values_are_rejected():
 def test_late_joiner_sees_spectator_view():
     table = Table()
     table.add_players(2)
-    table.start("one_of_ten")
+    table.start("one_of_ten", answers="choice")
     late = table.join("Spóźniony")
     view = table.view(late)
     assert "Dołączysz" in view["blocks"][0]["text"]

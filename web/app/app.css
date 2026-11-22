@@ -49,6 +49,7 @@ button:disabled { cursor: default; }
 .theme-floor { --accent: #2ee6d6; --accent-ink: #032724; --glow: #06404a; }
 .theme-familiada { --glow: #123a8c; }
 .theme-millionaires { --accent: #ff9d2e; --accent-ink: #231200; --glow: #1b2a8a; }
+.theme-tournament { --accent: #ffd24a; --accent-ink: #241a00; --glow: #4a1f7a; }
 
 .bar {
   display: flex;
@@ -186,6 +187,58 @@ button:disabled { cursor: default; }
 .btn.tile .btn-label { flex: none; font: 800 30px "Barlow Condensed", system-ui, sans-serif; }
 .btn.tile small { max-width: none; text-align: center; }
 
+/* Odpowiedź z głowy: duży mikrofon, podgląd rozpoznanego tekstu i pole do wpisania. */
+.answer-box { display: flex; flex-direction: column; gap: 12px; }
+.mic {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: min(38vh, 230px);
+  border-radius: 24px;
+  background: var(--panel-2);
+  box-shadow: inset 0 0 0 2px var(--accent);
+  font-size: 19px;
+  font-weight: 700;
+  transition: background .12s, transform .08s;
+}
+.mic svg { width: 72px; height: 72px; color: var(--accent); }
+.mic:active { transform: scale(.985); }
+.listening .mic { background: var(--accent); color: var(--accent-ink); animation: mic-pulse 1.3s ease-in-out infinite; }
+.listening .mic svg { color: var(--accent-ink); }
+@keyframes mic-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 255, 255, .4); }
+  50% { box-shadow: 0 0 0 14px rgba(255, 255, 255, 0); }
+}
+@media (prefers-reduced-motion: reduce) { .listening .mic { animation: none; } }
+.heard { min-height: 26px; text-align: center; font-size: 21px; font-weight: 700; overflow-wrap: anywhere; }
+.heard:empty { min-height: 0; }
+.heard.interim { color: var(--muted); font-style: italic; }
+.heard.sent { color: #6df0a2; }
+.heard.bad { color: #ff9a9d; font-size: 16px; font-weight: 600; }
+.type-row { display: flex; gap: 8px; }
+.type-row input {
+  flex: 1;
+  min-width: 0;
+  min-height: 54px;
+  padding: 8px 14px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--panel);
+  color: var(--ink);
+  font: 600 19px "Barlow", system-ui, sans-serif;
+  box-shadow: inset 0 0 0 1px var(--line);
+  outline: 2px solid transparent;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.type-row input:focus { outline-color: var(--accent); }
+.type-row input::placeholder { color: var(--muted); opacity: .7; }
+.type-row .send { flex: none; width: auto; min-height: 54px; padding: 0 18px; font-size: 18px; }
+.voice-hint { color: var(--muted); font-size: 14px; text-align: center; }
+
 .dot { flex: none; display: inline-block; width: 14px; height: 14px; border-radius: 50%; }
 
 .ranking { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
@@ -205,6 +258,7 @@ button:disabled { cursor: default; }
 .card-floor { background: linear-gradient(120deg, #06717a, #0b2a3f); }
 .card-familiada { background: linear-gradient(120deg, #1a4fc0, #0e1f6b); }
 .card-millionaires { background: linear-gradient(120deg, #31238f, #0c1445); }
+.card-tournament { background: linear-gradient(120deg, #a87a0c, #4a1f7a); }
 
 .back { padding: 6px 0; color: var(--muted); font-size: 16px; align-self: flex-start; }
 .option-group label { display: block; margin-bottom: 6px; color: var(--muted); font-size: 14px; font-weight: 600; }

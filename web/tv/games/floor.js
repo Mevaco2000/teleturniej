@@ -37,12 +37,16 @@
     var html = '<div class="card">' +
       (c.flag ? '<div class="card-flag">' + Core.flag(c.flag) + "</div>" : "") +
       '<div class="card-prompt">' + esc(c.prompt) + "</div>" +
-      (c.clue ? '<div class="card-clue">' + esc(c.clue) + "</div>" : "") + '<div class="card-options">';
-    c.options.forEach(function (label, i) {
-      html += '<div class="card-option" data-key="o' + i + esc(label) + '">' + esc(label) + "</div>";
-    });
-    html += "</div></div>";
-    return html;
+      (c.clue ? '<div class="card-clue">' + esc(c.clue) + "</div>" : "");
+    // W trybie „Z głowy” opcji nie ma: gracze mówią odpowiedź do telefonu.
+    if (c.options) {
+      html += '<div class="card-options">';
+      c.options.forEach(function (label, i) {
+        html += '<div class="card-option" data-key="o' + i + esc(label) + '">' + esc(label) + "</div>";
+      });
+      html += "</div>";
+    }
+    return html + "</div>";
   }
 
   function feedback(g) {

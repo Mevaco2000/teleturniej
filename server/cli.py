@@ -31,7 +31,7 @@ def _env_port() -> int:
 
 
 def _parse_args(argv=None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(prog="python -m server", description="Teleturnieje na telewizor i telefony")
+    parser = argparse.ArgumentParser(prog="python -m server", description="Sutoliada: teleturnieje na telewizor i telefony")
     parser.add_argument("--port", type=int, default=_env_port(), help="port HTTP (domyślnie 8000 albo zmienna PORT)")
     parser.add_argument("--cloud", action="store_true",
                         help="serwer w internecie: bez wykrywania sieci lokalnej; adres z --public-url "

@@ -48,6 +48,24 @@ def buzz(label: str = "ZGŁASZAM SIĘ!", action: str = "buzz") -> dict:
     return {"type": "buzz", "action": action, "label": label}
 
 
+def answer_box(key: str, action: str = "say", auto: bool = True, sticky: bool = False) -> dict:
+    """Odpowiedź z głowy: mikrofon (rozpoznawanie mowy w telefonie) albo pole tekstowe.
+
+    key: nowy klucz czyści pole, więc każde pytanie dostaje własny. auto: rozpoznana wypowiedź
+    od razu idzie do serwera. sticky: mikrofon zostaje włączony na kolejne pytania (The Floor).
+    """
+    return {"type": "answer", "action": action, "key": str(key), "auto": auto, "sticky": sticky}
+
+
+# Wspólna opcja gier, w których da się odpowiadać z głowy zamiast wybierać z listy.
+ANSWERS_OPTION = {
+    "key": "answers",
+    "label": "Odpowiedzi",
+    "default": "voice",
+    "choices": [{"v": "voice", "l": "Z głowy: mów lub pisz"}, {"v": "choice", "l": "Do wyboru (łatwiej)"}],
+}
+
+
 def btn(action: str, label: str, v: Any = None, style: str = "", disabled: bool = False,
         hint: str = "", color: str = "") -> dict:
     return {"action": action, "label": label, "v": v, "style": style, "disabled": disabled,
@@ -67,6 +85,8 @@ class Game:
     needs_tv = False
     option_defs: list[dict] = []
     allow_spectators = False
+    # Gra drużynowa: drużyny poznajemy dopiero po starcie, więc w turnieju nie typuje się podium.
+    team_game = False
 
     def __init__(self, session, opts: dict, roster: list[str]):
         self.s = session
@@ -79,6 +99,8 @@ class Game:
         self.note = ""
         self.stopped = False
         self._timers: dict[str, _Timer] = {}
+        # Wywoływane po zakończeniu gry, gdy gra jest częścią turnieju.
+        self.on_finished: Optional[Callable] = None
 
     @classmethod
     def required_players(cls, opts: dict) -> int:
@@ -160,6 +182,11 @@ class Game:
 
     # --- Pomocnicze --------------------------------------------------------
 
+    @property
+    def voice(self) -> bool:
+        """Odpowiedzi z głowy zamiast listy opcji."""
+        return self.opts.get("answers") == "voice"
+
     def name(self, pid: Optional[str]) -> str:
         return self.s.pinfo(pid)["name"] if pid else ""
 
@@ -189,6 +216,12 @@ class Game:
         self.note = note
         self.screen = "results"
         self.fx("fanfare")
+        if self.on_finished:
+            self.on_finished(self)
+
+    def absorb_abort(self, message: str) -> bool:
+        """Czy gra sama obsłuży przerwanie (turniej pomija wtedy tylko bieżącą grę)."""
+        return False
 
     # --- Widoki ------------------------------------------------------------
 

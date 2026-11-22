@@ -74,7 +74,7 @@
     var local = /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|localhost|127\.)/.test(host);
     return '<div class="lobby">' +
       '<div class="lobby-left">' +
-      '<div class="brand">Teleturniej</div>' +
+      '<div class="brand">Sutoliada</div>' +
       '<div class="qr-card"><img class="qr" src="/qr.svg?r=' + encodeURIComponent(state.room) + '" alt="Kod QR"></div>' +
       '<div class="join-title">Zeskanuj telefonem</div>' +
       '<div class="join-url">albo wejdź na <b>' + esc(host) + "</b> i wpisz kod</div>" +
@@ -95,6 +95,9 @@
     if (!game) html = renderLobby();
     else if (game.screen === "results") html = TV.results(game);
     else html = TV.games[game.id](game, state);
+    if (game && game.tournament) {
+      html = '<div class="tour-badge">Turniej · gra ' + game.tournament.number + " z " + game.tournament.total + "</div>" + html;
+    }
     // Zmiana gry wymienia całą scenę, żeby nie animować elementów poprzedniej.
     var scene = game ? game.id : "lobby";
     if (stage.getAttribute("data-scene") !== scene) {
@@ -170,7 +173,7 @@
         saveRoom(msg.code, msg.key);
       } else if (msg.t === "busy") {
         net.stop();
-        stage.innerHTML = TV.splash("Teleturniej", "Serwer jest teraz zajęty", "Spróbuję ponownie za minutę");
+        stage.innerHTML = TV.splash("Sutoliada", "Serwer jest teraz zajęty", "Spróbuję ponownie za minutę");
         setTimeout(function () { location.reload(); }, 60000);
       } else if (msg.t === "state") {
         state = msg.state;

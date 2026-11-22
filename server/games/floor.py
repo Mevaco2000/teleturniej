@@ -7,7 +7,8 @@ from __future__ import annotations
 import math
 from typing import Optional
 
-from .base import Game, btn, buttons, msg, options
+from ..answers import is_pass, judge, spoken_texts
+from .base import ANSWERS_OPTION, Game, answer_box, btn, buttons, msg, options
 
 BOT_NAMES = ["Zenek", "Halina", "Mietek", "Grażyna", "Staszek", "Jadzia", "Ziutek", "Krysia",
              "Benek", "Wanda", "Heniek", "Bożena", "Lolek", "Irena", "Rysiek", "Tola"]
@@ -61,9 +62,11 @@ class Floor(Game):
         "Każdy zaczyna z jednym polem i własną kategorią.",
         "Wylosowany gracz wyzywa sąsiada. Pojedynek toczy się w kategorii obrońcy.",
         "Zegar szachowy: dobra odpowiedź przełącza czas na rywala. Kto pierwszy zejdzie do zera, odpada.",
+        "Odpowiadasz z głowy: mówisz do telefonu (mikrofon słucha przez cały Twój czas) albo wpisujesz. Słowo „pas” losuje nowe hasło.",
         "Zwycięzca przejmuje pola. Wygrywa ostatni na planszy.",
     ]
     option_defs = [
+        ANSWERS_OPTION,
         {"key": "tiles", "label": "Rozmiar planszy", "default": 0, "choices": [
             {"v": 0, "l": "Tylko gracze"}, {"v": 6, "l": "6 pól"}, {"v": 9, "l": "9 pól"},
             {"v": 12, "l": "12 pól"}, {"v": 16, "l": "16 pól"},
@@ -106,6 +109,7 @@ class Floor(Game):
         self.feedback: Optional[dict] = None
         self.winner: Optional[str] = None
         self.eliminated: list[str] = []
+        self.card_id = 0
         self.screen = "board"
         self.set_timer(BOARD_SECONDS, self._next_challenger)
 
@@ -182,12 +186,15 @@ class Floor(Game):
             self.deck = list(category["items"])
             self.rng.shuffle(self.deck)
         item = self.deck.pop()
-        answers = sorted({i["a"] for i in category["items"] if i["a"] != item["a"]})
+        others = sorted({i["a"] for i in category["items"] if i["a"] != item["a"]})
+        answers = list(others)
         self.rng.shuffle(answers)
         labels = [item["a"], *answers[:3]]
         self.rng.shuffle(labels)
+        self.card_id += 1
         self.card = {"clue": item.get("c", ""), "flag": item.get("flag"), "prompt": category.get("prompt", ""),
-                     "options": labels, "correct": labels.index(item["a"])}
+                     "options": labels, "correct": labels.index(item["a"]),
+                     "answer": item["a"], "alts": list(item.get("alt", [])), "others": others}
         self.locked = False
         self._schedule_bot()
 
@@ -213,9 +220,27 @@ class Floor(Game):
             self._answer(self.rng.choice(wrong))
 
     def _answer(self, index: int) -> None:
-        if index == self.card["correct"]:
+        self._judged(index == self.card["correct"], self.card["options"][index])
+
+    def _said(self, texts: list[str]) -> None:
+        if is_pass(texts):
+            self._pass()
+            return
+        card = self.card
+        verdict = judge(texts, [[card["answer"], *card["alts"]]], context=f'{card["prompt"]} {card["clue"]}',
+                        distractors=card["others"])
+        if not verdict.empty:
+            # Po dobrej odpowiedzi widać na ekranie oficjalny zapis, po złej to, co usłyszał telefon.
+            self._judged(verdict.ok, card["answer"] if verdict.ok else verdict.heard)
+
+    def _pass(self) -> None:
+        self.feedback = {"who": self.active, "correct": None, "label": "Pas"}
+        self._lock_and_redraw(PASS_LOCK_SECONDS)
+
+    def _judged(self, correct: bool, label: str) -> None:
+        if correct:
             self.fx("good")
-            self.feedback = {"who": self.active, "correct": True, "label": self.card["options"][index]}
+            self.feedback = {"who": self.active, "correct": True, "label": label}
             self._store_clock()
             self.cancel_timer("duel")
             self.active = self.defender if self.active == self.challenger else self.challenger
@@ -223,7 +248,7 @@ class Floor(Game):
             self._run_clock()
         else:
             self.fx("bad")
-            self.feedback = {"who": self.active, "correct": False, "label": self.card["options"][index]}
+            self.feedback = {"who": self.active, "correct": False, "label": label}
             self._lock_and_redraw(WRONG_LOCK_SECONDS)
 
     def _lock_and_redraw(self, seconds: float) -> None:
@@ -272,11 +297,14 @@ class Floor(Game):
             if value in self._rivals(pid):
                 self._begin_duel(value)
         elif self.screen == "duel" and pid == self.active and not self.locked and self.card:
-            if action == "answer" and isinstance(value, int) and 0 <= value < len(self.card["options"]):
+            if action == "answer" and not self.voice and isinstance(value, int) and 0 <= value < len(self.card["options"]):
                 self._answer(value)
+            elif action == "say" and self.voice:
+                texts = spoken_texts(m)
+                if texts:
+                    self._said(texts)
             elif action == "pass":
-                self.feedback = {"who": pid, "correct": None, "label": "Pas"}
-                self._lock_and_redraw(PASS_LOCK_SECONDS)
+                self._pass()
 
     # --- Widoki ------------------------------------------------------------
 
@@ -291,7 +319,7 @@ class Floor(Game):
         if not self.card:
             return None
         return {"clue": self.card["clue"], "flag": self.card["flag"], "prompt": self.card["prompt"],
-                "options": self.card["options"]}
+                "options": None if self.voice else self.card["options"]}
 
     def view_tv(self) -> dict:
         return {
@@ -330,11 +358,20 @@ class Floor(Game):
             if pid != self.active:
                 return self.pv(msg("Czas rywala. Przygotuj się!", big=True), sub=sub, clock=clock)
             if self.locked:
-                return self.pv(msg("Chwila…", "bad", big=True), sub=sub, clock=clock)
+                blocks = [msg("Chwila…", "bad", big=True)]
+                feedback = self.feedback
+                if self.voice and feedback and feedback["who"] == pid and feedback["correct"] is False:
+                    blocks.append(msg(f"„{feedback['label']}” to nie to."))
+                return self.pv(*blocks, sub=sub, clock=clock)
             card = self.card
             prompt = (f'{card["prompt"]} {card["clue"]}').strip()
-            return self.pv(options("answer", card["options"], letters=False),
-                           buttons(btn("pass", "Pas (3 s kary)", style="ghost")),
+            if self.voice:
+                block = answer_box(f"c{self.card_id}", sticky=True)
+                hint = "Pas (3 s kary) — możesz też powiedzieć „pas”"
+            else:
+                block = options("answer", card["options"], letters=False)
+                hint = "Pas (3 s kary)"
+            return self.pv(block, buttons(btn("pass", hint, style="ghost")),
                            sub=sub, prompt=prompt, clock=clock, flag=card["flag"])
         if self.screen == "duel_intro" and pid in (self.challenger, self.defender):
             return self.pv(msg(f'Pojedynek! Kategoria: {self.duel_category["name"]}', "good", big=True), sub=sub)

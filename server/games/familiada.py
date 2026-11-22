@@ -1,13 +1,15 @@
 """Familiada: dwie drużyny, tablica ukrytych odpowiedzi, trzy błędy i przejęcie pytania.
 
-Zamiast pisania odpowiedzi telefon pokazuje listę z pozycjami z tablicy i fałszywkami,
-bo bez prowadzącego dopasowywanie odmienionych polskich słów dawałoby niesprawiedliwe błędy.
+W trybie „Z głowy” gracz mówi lub wpisuje odpowiedź, a serwer szuka jej na tablicy
+z tolerancją na odmianę („kawa” trafia w „Piję kawę”). W trybie „Do wyboru” telefon pokazuje
+listę z pozycjami z tablicy i fałszywkami.
 """
 from __future__ import annotations
 
 from typing import Optional
 
-from .base import Game, buzz, msg, options
+from ..answers import judge, spoken_texts
+from .base import ANSWERS_OPTION, Game, answer_box, buzz, msg, options
 
 MULTIPLIERS = [1, 1, 2, 2, 3, 3, 3]
 BUZZ_SECONDS = 12
@@ -27,13 +29,16 @@ class Familiada(Game):
     tagline = "Drużyny kontra to, co odpowiedzieli ankietowani."
     # Jedna osoba gra sama w drużynie Czerwonych: bez pojedynku z rywalem i bez przejęcia.
     min_players = 1
+    team_game = True
     rules = [
         "Dwie drużyny zgadują najpopularniejsze odpowiedzi z ankiety (punkty są szacunkowe).",
         "Pojedynek: po jednej osobie z drużyny. Kto trafi wyżej na tablicy, przejmuje pytanie dla drużyny.",
         "Drużyna odpowiada po kolei. Trzy błędy i pytanie może przejąć przeciwnik.",
+        "Odpowiadasz z głowy: mówisz do telefonu albo wpisujesz. Powtórka odpowiedzi z tablicy nie jest błędem.",
         "Kolejne rundy mają mnożniki, więc koniec gry bywa zaskakujący.",
     ]
     option_defs = [
+        ANSWERS_OPTION,
         {"key": "rounds", "label": "Liczba rund", "default": 5, "choices": [
             {"v": 3, "l": "3"}, {"v": 5, "l": "5"}, {"v": 7, "l": "7"},
         ]},
@@ -68,6 +73,8 @@ class Familiada(Game):
         self.first_team = 0
         self.last_pick: Optional[dict] = None
         self.round_winner: Optional[int] = None
+        self.hint = ""
+        self.prompt_id = 0
         self.screen = "teams"
         self.set_timer(TEAMS_SECONDS, self._start_round)
 
@@ -118,21 +125,35 @@ class Familiada(Game):
     def _prompt(self, pid: str, mode: str) -> None:
         self.answerer = pid
         self.mode = mode
+        self.hint = ""
+        self.prompt_id += 1
         self.screen = "answer"
         self.set_timer(self.opts["time"], lambda: self._picked(None))
 
     def _rank_of(self, label: str) -> Optional[int]:
-        for rank, (text, _points) in enumerate(self.answers):
-            if text == label:
+        for rank, answer in enumerate(self.answers):
+            if answer[0] == label:
                 return rank
         return None
 
     def _picked(self, index: Optional[int]) -> None:
-        self.cancel_timer()
         label = self.choices[index] if index is not None else None
         if index is not None:
             self.tried.add(index)
-        rank = self._rank_of(label) if label is not None else None
+        self._scored(self._rank_of(label) if label is not None else None, label)
+
+    def _said(self, texts: list[str]) -> None:
+        targets = [[answer[0], *(answer[2] if len(answer) > 2 else [])] for answer in self.answers]
+        verdict = judge(texts, targets, context=self.question["q"], lenient=True)
+        if verdict.empty:
+            self.hint = "Nie usłyszałem odpowiedzi. Powiedz jeszcze raz."
+        elif verdict.ok and verdict.index in self.revealed:
+            self.hint = f"„{self.answers[verdict.index][0]}” już jest na tablicy. Powiedz coś innego."
+        else:
+            self._scored(verdict.index, verdict.heard)
+
+    def _scored(self, rank: Optional[int], label: Optional[str]) -> None:
+        self.cancel_timer()
         points = 0
         if rank is not None:
             self.revealed.add(rank)
@@ -144,7 +165,7 @@ class Familiada(Game):
             if self.mode == "play":
                 self.strikes += 1
         self.last_pick = {"player": self.s.pinfo(self.answerer), "label": label, "hit": rank is not None,
-                          "points": points}
+                          "points": points, "board": self.answers[rank][0] if rank is not None else None}
         handler = {
             "duel_first": self._after_duel_first,
             "duel_second": self._after_duel_second,
@@ -235,9 +256,13 @@ class Familiada(Game):
         if action == "buzz" and self.screen == "duel_buzz" and pid in self.duelists:
             self.fx("buzz")
             self._duel_first(pid)
-        elif action == "pick" and self.screen == "answer" and pid == self.answerer:
+        elif action == "pick" and self.screen == "answer" and pid == self.answerer and not self.voice:
             if isinstance(value, int) and 0 <= value < len(self.choices) and value not in self.tried:
                 self._picked(value)
+        elif action == "say" and self.screen == "answer" and pid == self.answerer and self.voice:
+            texts = spoken_texts(m)
+            if texts:
+                self._said(texts)
 
     # --- Widoki ------------------------------------------------------------
 
@@ -251,7 +276,8 @@ class Familiada(Game):
 
     def view_tv(self) -> dict:
         board = []
-        for rank, (label, points) in enumerate(self.answers):
+        for rank, answer in enumerate(self.answers):
+            label, points = answer[0], answer[1]
             shown = rank in self.revealed
             board.append({
                 "n": rank + 1,
@@ -285,10 +311,13 @@ class Familiada(Game):
             return self.pv(buzz("ZNAM ODPOWIEDŹ!"), sub=sub, prompt=self.question["q"],
                            timer=self.timer_view(), **extra)
         if self.screen == "answer" and pid == self.answerer:
-            states = {i: "disabled" for i in self.tried}
-            block = options("pick", self.choices, columns=2, states=states, letters=False)
+            if self.voice:
+                block = answer_box(f"p{self.prompt_id}")
+            else:
+                states = {i: "disabled" for i in self.tried}
+                block = options("pick", self.choices, columns=2, states=states, letters=False)
             label = "Przejęcie! Jedna odpowiedź." if self.mode == "steal" else ""
-            blocks = ([msg(label, "good")] if label else []) + [block]
+            blocks = ([msg(label, "good")] if label else []) + ([msg(self.hint, "bad")] if self.hint else []) + [block]
             return self.pv(*blocks, sub=sub, prompt=self.question["q"], timer=self.timer_view(), **extra)
         if self.screen == "teams":
             mates = ", ".join(self.name(p) for p in self.teams[team] if p != pid)
@@ -299,9 +328,12 @@ class Familiada(Game):
             return self.pv(msg("Runda dla Was!" if won else "Runda dla rywali.", "good" if won else "bad", big=True),
                            sub=sub, **extra)
         if self.screen == "picked" and self.last_pick and self.last_pick["player"]["id"] == pid:
-            hit = self.last_pick["hit"]
-            return self.pv(msg("Jest na tablicy!" if hit else "Nie ma na tablicy.", "good" if hit else "bad", big=True),
-                           sub=sub, **extra)
+            pick = self.last_pick
+            hit = pick["hit"]
+            blocks = [msg("Jest na tablicy!" if hit else "Nie ma na tablicy.", "good" if hit else "bad", big=True)]
+            if self.voice and pick["label"] is not None:
+                blocks.append(msg(f"Twoja odpowiedź: „{pick['label']}”" + (f" = {pick['board']}" if hit else "")))
+            return self.pv(*blocks, sub=sub, **extra)
         if self.screen == "answer":
             return self.pv(msg(f"Odpowiada {self.name(self.answerer)}.", big=True), sub=sub, **extra)
         if self.screen == "duel_buzz":

@@ -114,7 +114,200 @@
     return html + "</ol>";
   }
 
-  var BLOCKS = { msg: blockMsg, options: blockOptions, buzz: blockBuzz, buttons: blockButtons, ranking: blockRanking };
+  /* --- Odpowiedź z głowy: rozpoznawanie mowy wbudowane w przeglądarkę telefonu ---
+     Chrome na Androidzie i Safari na iPhonie zamieniają mowę na tekst (wymaga HTTPS i internetu).
+     Tekst z kilkoma wariantami rozpoznania idzie do serwera, który ocenia odpowiedź. Gdy mowy
+     nie ma, zostaje pole tekstowe, a w nim dyktowanie z klawiatury telefonu. */
+
+  var MIC_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 14.5a3.5 3.5 0 0 0 3.5-3.5V5.5a3.5 3.5 0 0 0-7 0V11a3.5 3.5 0 0 0 3.5 3.5zm6-3.5a6 6 0 0 1-12 0H4.2a7.8 7.8 0 0 0 6.9 7.7V21h1.8v-2.3a7.8 7.8 0 0 0 6.9-7.7z"/></svg>';
+
+  var Voice = (function () {
+    var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    var api = { supported: !!SR && !!window.isSecureContext };
+    var rec = null;
+    var form = null;
+    var sticky = false;
+    var auto = false;
+    var restartTimer = null;
+
+    function alive(f) {
+      return !!f && document.body.contains(f);
+    }
+
+    function status(f, text, cls) {
+      var el = f && f.querySelector(".heard");
+      if (!el) return;
+      el.textContent = text || "";
+      el.className = "heard" + (cls ? " " + cls : "");
+    }
+
+    function listening(f, on) {
+      if (!f) return;
+      if (on) f.classList.add("listening"); else f.classList.remove("listening");
+      var label = f.querySelector(".mic-label");
+      if (label) label.textContent = on ? "Słucham… mów teraz" : "Stuknij i powiedz";
+    }
+
+    function deliver(f, texts) {
+      if (!alive(f) || !texts.length) return;
+      if (f.getAttribute("data-auto")) {
+        api.send(f, texts[0], texts.slice(1));
+      } else {
+        f.elements.say.value = texts[0];
+        f.recognized = texts[0];
+        f.alts = texts.slice(1);
+        status(f, "", "");
+      }
+    }
+
+    function halt() {
+      if (restartTimer) {
+        clearTimeout(restartTimer);
+        restartTimer = null;
+      }
+      if (rec) {
+        var r = rec;
+        rec = null;
+        try { r.abort(); } catch (e) { /* już zatrzymane */ }
+      }
+      listening(form, false);
+    }
+
+    function start(f, automatic) {
+      if (!api.supported || !alive(f)) return;
+      halt();
+      form = f;
+      auto = !!automatic;
+      sticky = !!f.getAttribute("data-sticky");
+      var r = new SR();
+      r.lang = "pl-PL";
+      r.interimResults = true;
+      r.maxAlternatives = 5;
+      // The Floor: mikrofon słucha przez cały czas gracza, a każda wypowiedź to osobna odpowiedź.
+      r.continuous = sticky;
+      r.onresult = function (e) {
+        if (rec !== r) return;
+        for (var i = e.resultIndex; i < e.results.length; i++) {
+          var result = e.results[i];
+          if (!result.isFinal) {
+            status(form, result[0].transcript, "interim");
+            continue;
+          }
+          var texts = [];
+          for (var j = 0; j < result.length; j++) {
+            var t = String(result[j].transcript || "").trim();
+            if (t && texts.indexOf(t) < 0) texts.push(t);
+          }
+          deliver(form, texts);
+        }
+      };
+      r.onerror = function (e) {
+        if (rec !== r) return;
+        var why = e.error;
+        if (why === "not-allowed" || why === "service-not-allowed") {
+          sticky = false;
+          status(form, auto ? "Stuknij mikrofon, żeby mówić." :
+            "Brak zgody na mikrofon. Zezwól na niego w ustawieniach przeglądarki albo wpisz odpowiedź.", "bad");
+        } else if (why === "audio-capture") {
+          sticky = false;
+          status(form, "Nie znaleziono mikrofonu. Wpisz odpowiedź.", "bad");
+        } else if (why === "network") {
+          sticky = false;
+          status(form, "Rozpoznawanie mowy potrzebuje internetu. Wpisz odpowiedź.", "bad");
+        } else if (why === "no-speech" && !sticky) {
+          status(form, "Nic nie usłyszałem. Stuknij i spróbuj jeszcze raz.", "bad");
+        }
+      };
+      r.onend = function () {
+        if (rec !== r) return;
+        rec = null;
+        listening(form, false);
+        // Przeglądarka sama kończy nasłuch po chwili ciszy; w The Floor wznawiamy go od razu.
+        if (sticky && alive(form)) {
+          restartTimer = setTimeout(function () {
+            restartTimer = null;
+            if (sticky && !rec && alive(form)) start(form, true);
+          }, 200);
+        }
+      };
+      rec = r;
+      try {
+        r.start();
+        listening(f, true);
+        if (!automatic) status(f, "", "");
+      } catch (err) {
+        rec = null;
+        sticky = false;
+        status(f, "Nie udało się włączyć mikrofonu. Wpisz odpowiedź.", "bad");
+      }
+    }
+
+    api.send = function (f, text, alts) {
+      action(f.getAttribute("data-answer"), text, { alts: alts || [] });
+      vibrate(15);
+      status(f, "Wysłano: „" + text + "”", "sent");
+      f.elements.say.value = "";
+      f.recognized = null;
+    };
+
+    api.toggle = function (f) {
+      if (rec && form === f) {
+        sticky = false;
+        halt();
+      } else {
+        start(f, false);
+      }
+    };
+
+    /* Po każdym odświeżeniu ekranu: wyniki trafiają do aktualnego pola, a bez pola mikrofon milknie.
+       W The Floor mikrofon wraca sam przy kolejnym haśle i po turze rywala. */
+    api.sync = function (typing) {
+      var f = document.querySelector("form.answer-box");
+      if (f === form) return;
+      var keep = sticky;
+      if (!f) {
+        halt();
+        sticky = keep;
+        form = null;
+        return;
+      }
+      var stickyNext = keep && !!f.getAttribute("data-sticky");
+      if (rec && stickyNext) {
+        form = f;
+        listening(f, true);
+      } else {
+        halt();
+        form = f;
+        sticky = stickyNext;
+        if (stickyNext) start(f, true);
+      }
+      if (typing && f.getAttribute("data-sticky")) f.elements.say.focus();
+    };
+
+    api.reset = function () {
+      sticky = false;
+      halt();
+      form = null;
+    };
+
+    return api;
+  })();
+
+  function blockAnswer(b) {
+    var voice = Voice.supported;
+    return '<form class="answer-box" data-key="ans-' + esc(b.key) + '" data-keep="1" data-answer="' + esc(b.action) + '"' +
+      (b.auto ? ' data-auto="1"' : "") + (b.sticky ? ' data-sticky="1"' : "") + ' autocomplete="off">' +
+      (voice ? '<button type="button" class="mic" data-mic="1">' + MIC_ICON + '<span class="mic-label">Stuknij i powiedz</span></button>' : "") +
+      '<div class="heard" aria-live="polite"></div>' +
+      '<div class="type-row"><input name="say" type="text" maxlength="160" autocomplete="off" autocorrect="off" ' +
+      'autocapitalize="sentences" spellcheck="false" enterkeyhint="send" aria-label="Odpowiedź" placeholder="' +
+      (voice ? "…albo wpisz" : "Wpisz odpowiedź") + '"><button type="submit" class="btn primary send">Wyślij</button></div>' +
+      (voice ? "" : '<small class="voice-hint">Możesz też dyktować: stuknij pole, a potem mikrofon na klawiaturze.</small>') +
+      "</form>";
+  }
+
+  var BLOCKS = { msg: blockMsg, options: blockOptions, buzz: blockBuzz, buttons: blockButtons, ranking: blockRanking,
+    answer: blockAnswer };
 
   function renderGame(view) {
     var hasClock = view.clock || view.timer;
@@ -198,7 +391,7 @@
   }
 
   function renderLobby() {
-    var html = '<div class="screen lobby"><header class="bar"><div><strong>Teleturniej</strong><small>Kod gry: ' + esc(state.room) +
+    var html = '<div class="screen lobby"><header class="bar"><div><strong>Sutoliada</strong><small>Kod gry: ' + esc(state.room) +
       " · Graczy: " + state.players.length + "</small></div></header>" +
       '<main class="content">';
     if (state.notice) html += '<div class="msg bad">' + esc(state.notice) + "</div>";
@@ -225,7 +418,11 @@
 
   function render() {
     if (!joined || !state) return;
+    var active = document.activeElement;
+    var typing = !!(active && active.name === "say" && active.form && active.form.getAttribute("data-answer"));
     Core.patch(root, state.game ? renderGame(state.game) : renderLobby());
+    if (state.game) Voice.sync(typing);
+    else Voice.reset();
     // Nowy ekran zaczyna się od góry, żeby pytanie i przycisk powrotu nie zostały poza widokiem.
     var view = state.game ? "game|" + state.game.prompt : "lobby|" + state.selected;
     if (view !== lastView) {
@@ -233,7 +430,7 @@
       window.scrollTo(0, 0);
     }
     var urgent = !!(state.game && state.game.blocks && state.game.blocks.some(function (b) {
-      return b.type === "options" || b.type === "buzz" || b.type === "buttons";
+      return b.type === "options" || b.type === "buzz" || b.type === "buttons" || b.type === "answer";
     }));
     if (urgent && !lastUrgent) vibrate(60);
     lastUrgent = urgent;
@@ -296,9 +493,26 @@
 
   document.addEventListener("click", function (e) {
     var control = findControl(e.target);
+    if (control && control.getAttribute("data-mic")) {
+      vibrate(20);
+      Voice.toggle(control.form);
+      return;
+    }
     if (!control || control.form) return;
     if (control.getAttribute("data-instant") && Date.now() - instantHandled < 1000) return;
     handleTap(control);
+  });
+
+  document.addEventListener("submit", function (e) {
+    var form = e.target;
+    if (!form.getAttribute || !form.getAttribute("data-answer")) return;
+    e.preventDefault();
+    var input = form.elements.say;
+    var text = input.value.trim();
+    if (!text) return;
+    // Warianty rozpoznania mowy pasują tylko do niezmienionego tekstu.
+    Voice.send(form, text, form.recognized === text ? form.alts : []);
+    if (!form.getAttribute("data-sticky")) input.blur();
   });
 
   roomInput.addEventListener("input", function () {

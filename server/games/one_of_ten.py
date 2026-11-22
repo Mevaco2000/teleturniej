@@ -1,9 +1,14 @@
-"""1 z 10: runda po dwa pytania, runda wskazywania i finał na punkty."""
+"""1 z 10: runda po dwa pytania, runda wskazywania i finał na punkty.
+
+W trybie „Z głowy” gracz mówi lub wpisuje odpowiedź, jak w telewizji. Telefon może źle
+usłyszeć, więc gospodarz ma przy odsłonięciu przycisk „Uznaj odpowiedź”, jak prowadzący.
+"""
 from __future__ import annotations
 
 from typing import Optional
 
-from .base import Game, btn, buttons, buzz, msg, options
+from ..answers import judge, spoken_texts
+from .base import ANSWERS_OPTION, Game, answer_box, btn, buttons, buzz, msg, options
 
 FINALISTS = 3
 START_LIVES = 3
@@ -12,6 +17,14 @@ FINAL_LIMIT = 30
 PICK_SECONDS = 10
 BUZZ_SECONDS = 12
 REVEAL_SECONDS = 3.5
+# Sporna odpowiedź zostaje dłużej na ekranie, żeby gospodarz zdążył ją uznać.
+DISPUTE_SECONDS = 6
+NOT_HEARD = "Nie usłyszałem odpowiedzi. Powiedz jeszcze raz."
+# Poziomy trudności pytań w rundach 1, 2 i w finale (1 – łatwe … 4 – bardzo trudne).
+LEVELS = {
+    "normal": {1: (1,), 2: (2,), 3: (2, 3)},
+    "hard": {1: (2,), 2: (3,), 3: (3, 4)},
+}
 
 
 class OneOfTen(Game):
@@ -21,11 +34,17 @@ class OneOfTen(Game):
     min_players = 1
     rules = [
         "Każdy ma trzy szanse. Zła odpowiedź zabiera jedną.",
+        "Odpowiadasz z głowy: mówisz do telefonu albo wpisujesz. Gospodarz może uznać źle usłyszaną odpowiedź.",
         "Runda 1: każdy dostaje po dwa pytania.",
         "Runda 2: kto odpowie dobrze, wskazuje kolejną osobę. Gra toczy się, aż zostanie trójka.",
         "Finał: zgłaszasz się najszybciej, a po dobrej odpowiedzi bierzesz pytanie na siebie (+20) lub wskazujesz rywala.",
     ]
-    option_defs = [{
+    option_defs = [ANSWERS_OPTION, {
+        "key": "level",
+        "label": "Pytania",
+        "default": "hard",
+        "choices": [{"v": "normal", "l": "Normalne"}, {"v": "hard", "l": "Trudne"}],
+    }, {
         "key": "time",
         "label": "Czas na odpowiedź",
         "default": 15,
@@ -39,6 +58,8 @@ class OneOfTen(Game):
         self.knocked_out: list[str] = []
         self.round = 1
         self.q = None
+        self.free = False
+        self.hint = ""
         self.answerer: Optional[str] = None
         self.picker: Optional[str] = None
         self.pointer: Optional[str] = None
@@ -62,18 +83,22 @@ class OneOfTen(Game):
         self.answerer = pid
         self.value = value
         if question is None:
-            difficulty = {1: 1, 2: 2, 3: self.rng.choice((2, 3))}[self.round]
-            question = self.s.content.question(difficulty)
+            question = self.s.content.question(self._difficulty())
         self.q = question
+        self.free = self.voice and question.free
+        self.hint = ""
         self.result = None
         self.asked += 1
         self.screen = "ask"
         self.set_timer(self.opts["time"], lambda: self._resolve(None))
 
-    def _resolve(self, chosen: Optional[int]) -> None:
+    def _difficulty(self) -> int:
+        return self.rng.choice(LEVELS[self.opts.get("level", "hard")][self.round])
+
+    def _resolve(self, chosen: Optional[int], said: Optional[str] = None) -> None:
         self.cancel_timer()
         correct = chosen == self.q.correct
-        self.result = {"correct": correct, "chosen": chosen}
+        self.result = {"correct": correct, "chosen": chosen, "said": said, "accepted": False}
         if correct:
             self.fx("good")
             if self.round == 3:
@@ -84,7 +109,31 @@ class OneOfTen(Game):
             if self.lives[self.answerer] == 0:
                 self.knocked_out.append(self.answerer)
         self.screen = "reveal"
-        self.set_timer(REVEAL_SECONDS, lambda: self._after_answer(correct))
+        disputed = not correct and said is not None
+        self.set_timer(DISPUTE_SECONDS if disputed else REVEAL_SECONDS, lambda: self._after_answer(correct))
+
+    def _said(self, texts: list[str]) -> None:
+        verdict = judge(texts, [[self.q.answer, *self.q.alts]], context=self.q.text, distractors=self.q.wrong)
+        if verdict.empty:
+            self.hint = NOT_HEARD
+            return
+        self._resolve(self.q.correct if verdict.ok else None, said=verdict.heard)
+
+    def _accept(self) -> None:
+        """Gospodarz uznaje odpowiedź, którą telefon źle usłyszał lub zapisano inaczej."""
+        pid = self.answerer
+        self.result.update(correct=True, accepted=True)
+        self.lives[pid] += 1
+        if pid in self.knocked_out:
+            self.knocked_out.remove(pid)
+        if self.round == 3:
+            self.points[pid] += self.value
+        self.fx("good")
+        self.set_timer(REVEAL_SECONDS, lambda: self._after_answer(True))
+
+    def _disputable(self) -> bool:
+        return (self.screen == "reveal" and self.result is not None and self.result["correct"] is False
+                and self.result.get("said") is not None and not self.result["accepted"])
 
     def _after_answer(self, correct: bool) -> None:
         if self.round == 1:
@@ -158,7 +207,8 @@ class OneOfTen(Game):
             self._finish()
             return
         self.final_asked += 1
-        self.q = self.s.content.question(self.rng.choice((2, 3)))
+        self.q = self.s.content.question(self._difficulty())
+        self.free = self.voice and self.q.free
         self.answerer = None
         self.picker = None
         self.pointer = None
@@ -167,7 +217,7 @@ class OneOfTen(Game):
         self.set_timer(BUZZ_SECONDS, self._no_buzz)
 
     def _no_buzz(self) -> None:
-        self.result = {"correct": None, "chosen": None}
+        self.result = {"correct": None, "chosen": None, "said": None, "accepted": False}
         self.screen = "reveal"
         self.set_timer(REVEAL_SECONDS, self._start_buzz)
 
@@ -221,9 +271,15 @@ class OneOfTen(Game):
 
     def on_action(self, pid: str, action: str, m: dict) -> None:
         value = m.get("v")
-        if action == "answer" and self.screen == "ask" and pid == self.answerer:
+        if action == "answer" and self.screen == "ask" and pid == self.answerer and not self.free:
             if isinstance(value, int) and 0 <= value < 4:
                 self._resolve(value)
+        elif action == "say" and self.screen == "ask" and pid == self.answerer and self.free:
+            texts = spoken_texts(m)
+            if texts:
+                self._said(texts)
+        elif action == "accept" and pid == self.s.host_id and self._disputable():
+            self._accept()
         elif action == "point" and pid == self.picker and self.screen in ("pick", "choice"):
             if value in self._alive() and value != pid:
                 self.cancel_timer()
@@ -259,11 +315,14 @@ class OneOfTen(Game):
             "timer": self.timer_view() if self.screen in ("ask", "buzz", "pick", "choice") else None,
         }
         if self.q:
+            reveal = self.screen == "reveal"
             view["q"] = {
                 "text": self.q.text,
                 "category": self.q.category,
-                "options": self.q.options if self.screen != "buzz" else None,
-                "correct": self.q.correct if self.screen == "reveal" else None,
+                "options": self.q.options if self.screen != "buzz" and not self.free else None,
+                "correct": self.q.correct if reveal and not self.free else None,
+                "free": self.free,
+                "answer": self.q.answer if reveal and self.free else None,
             }
         return view
 
@@ -278,6 +337,9 @@ class OneOfTen(Game):
             sub += f"  ·  {self.points[pid]} pkt"
         out = self.lives.get(pid, 0) <= 0
         if self.screen == "ask" and pid == self.answerer:
+            if self.free:
+                blocks = ([msg(self.hint, "bad")] if self.hint else []) + [answer_box(f"q{self.asked}")]
+                return self.pv(*blocks, sub=sub, prompt=self.q.text, timer=self.timer_view())
             return self.pv(options("answer", self.q.options), sub=sub, prompt=self.q.text,
                            timer=self.timer_view())
         if self.screen == "pick" and pid == self.picker:
@@ -291,12 +353,28 @@ class OneOfTen(Game):
             return self.pv(*blocks, sub=sub, timer=self.timer_view())
         if self.screen == "buzz" and pid in self._alive():
             return self.pv(buzz(), sub=sub, prompt=self.q.text, timer=self.timer_view())
-        if self.screen == "reveal" and pid == self.answerer and self.result:
-            good = self.result["correct"]
-            return self.pv(msg("Dobrze!" if good else "Niestety, źle.", "good" if good else "bad", big=True), sub=sub)
+        if self.screen == "reveal" and self.result and (pid == self.answerer or self._disputable()):
+            return self.pv(*self._reveal_blocks(pid), sub=sub)
         if out:
             return self.pv(msg("Odpadasz z tej gry. Kibicuj na telewizorze!", big=True), sub=sub)
         return self.pv(msg(self._waiting_text(), big=True), sub=sub)
+
+    def _reveal_blocks(self, pid: str) -> list[dict]:
+        result = self.result
+        blocks = []
+        if pid == self.answerer and result["correct"] is not None:
+            good = result["correct"]
+            text = "Uznane!" if result["accepted"] else "Dobrze!" if good else "Niestety, źle."
+            blocks.append(msg(text, "good" if good else "bad", big=True))
+        if self.free and result.get("said") is not None:
+            who = "Twoja odpowiedź" if pid == self.answerer else f"{self.name(self.answerer)} odpowiada"
+            blocks.append(msg(f"{who}: „{result['said']}”. Poprawna: {self.q.answer}."))
+        elif self.free and result["correct"] is False:
+            blocks.append(msg(f"Czas minął. Poprawna odpowiedź: {self.q.answer}."))
+        if pid == self.s.host_id and self._disputable():
+            blocks.append(buttons(btn("accept", "Uznaj odpowiedź", style="primary")))
+            blocks.append(msg("Telefon mógł źle usłyszeć. Jako gospodarz możesz uznać odpowiedź."))
+        return blocks
 
     def _target_buttons(self, pid: str) -> dict:
         return buttons(*[

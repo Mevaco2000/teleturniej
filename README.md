@@ -1,4 +1,4 @@
-# Teleturniej
+# Sutoliada
 
 Pięć teleturniejów na telewizor: **1 z 10, Jaka to melodia, The Floor, Familiada i Milionerzy**.
 Telewizor pokazuje grę w swojej przeglądarce, a każdy gra na swoim telefonie.
@@ -45,6 +45,35 @@ Każdy kolejny `git push` automatycznie aktualizuje grę.
 
 Odświeżenie strony lub chwilowe wyłączenie telefonu czy telewizora nie przerywa gry: telewizor wraca do swojego pokoju, a telefon do rozgrywki.
 
+### Odpowiedzi z głowy (mikrofon)
+
+W 1 z 10, Familiadzie, The Floor i Jaka to melodia nie ma listy odpowiedzi. Gracz stuka duży mikrofon i mówi odpowiedź albo ją wpisuje. Milionerzy zostają przy ABCD, bo tak wygląda ten format.
+
+- **Rozpoznawanie mowy** robi przeglądarka telefonu (Chrome na Androidzie, Safari na iPhonie). Wymaga HTTPS, więc działa w grze przez internet. Przy pierwszym użyciu telefon zapyta o zgodę na mikrofon. Gdy mikrofonu nie ma, zostaje pole tekstowe, w którym zadziała też dyktowanie z klawiatury.
+- **Ocena odpowiedzi** jest wyrozumiała: przyjmuje odmianę („w Warszawie”), samo nazwisko („Kopernik”), liczby słownie („tysiąc czterysta dziesięć”) i dodatki typu „chyba”. Nie przejdzie wyliczanka kilku odpowiedzi ani odpowiedź, która pasuje też do innej opcji (samo „Bolesław”).
+- **Gospodarz jak prowadzący:** w 1 z 10 po źle ocenionej odpowiedzi widzi przycisk **Uznaj odpowiedź**, gdy telefon coś przekręcił.
+- **The Floor:** mikrofon słucha przez cały Twój czas, a słowo „pas” losuje nowe hasło.
+- Kilka pytań nie nadaje się do odpowiedzi z głowy (wzory chemiczne, „Który z tych…”). Przy nich telefon sam pokaże opcje.
+- Łatwiejszy tryb z listą odpowiedzi włączysz w opcjach gry: **Odpowiedzi → Do wyboru**.
+- W 1 z 10 opcja **Pytania** ustawia poziom. **Trudne** (domyślnie) losuje w rundzie 1 pytania średnie, w rundzie 2 trudne, a w finale trudne i bardzo trudne. **Normalne** zaczyna od łatwych.
+
+### Milionerzy dla wielu osób
+
+Opcja **Tryb** w Milionerach:
+
+- **Wszyscy na drabince** (domyślnie): wszyscy odpowiadają naraz na te same pytania. Każdy ma własne koła ratunkowe i sam decyduje, kiedy się wycofać. Zła odpowiedź spada do kwoty gwarantowanej. Kto odpadnie albo się wycofa, zostaje publicznością: jego głosy tworzą wynik koła „publiczność”, a grający mogą do niego zadzwonić. Zegar nie staje dla nikogo. Telewizor po zamknięciu odpowiedzi pokazuje, kto co zaznaczył.
+- **Jeden fotel + zakłady**: klasyczne eliminacje i jedna osoba na fotelu. Reszta ma po 1000 żetonów i przy każdym pytaniu obstawia 100, 250, 500 albo wszystko, czy gracz odpowie dobrze. Trafny zakład zwraca stawkę z nadwyżką równą stawce, nietrafiony ją zabiera, a gdy gracz się wycofa, zakłady wracają do właścicieli. W rankingu przy remisie wygrywa więcej żetonów.
+
+### Turniej
+
+„Turniej” na liście gier łączy gry w jedną rozgrywkę: 1 z 10, Familiada, The Floor, Jaka to melodia i na koniec Milionerzy. W opcjach są też wersje „Bez muzyki” i „Szybki” (The Floor, Familiada, Milionerzy).
+
+- **Punkty za miejsce** w każdej grze: 10, 7, 5, 3, 2, a dalej po 1. Remis daje te same punkty. Boty z The Floor się nie liczą, a w Familiadzie miejsce drużyny dostaje każdy jej członek.
+- **Typowanie podium** przed każdą grą: każdy wskazuje na telefonie, kto zajmie 1., 2. i 3. miejsce. Trafione miejsce daje 3 pkt, pomyłka o jedno miejsce 1 pkt. W Familiadzie się nie typuje, bo drużyny są losowane dopiero na starcie.
+- Po każdej grze telewizor pokazuje wyniki (miejsca, typy, punkty), a potem tabelę turnieju. Gospodarz może przewinąć je przyciskiem **Dalej**.
+- Każda gra używa ustawień, które wybierzesz dla niej w menu, np. tryb Milionerów albo rozmiar planszy w The Floor.
+- Gra, która nie może ruszyć (muzyka bez włączonego telewizora) albo się przerwie, zostaje pominięta, a turniej toczy się dalej.
+
 ### Ograniczenia darmowego planu
 
 - **Usypianie.** Serwer usypia, gdy przez 15 minut nie jest otwarty żaden ekran gry, a pierwsze otwarcie po przerwie trwa do minuty. Otwarty ekran TV co minutę daje znać, że gra trwa, więc w jej trakcie serwer nie zaśnie.
@@ -64,6 +93,7 @@ Potrzebny jest Python 3.11 lub nowszy, a wszystkie urządzenia muszą być w tej
 3. Naciśnij **OK** na pilocie i zeskanuj telefonem kod QR z ekranu.
 
 Pełna instalacja PWA wymaga HTTPS, którego przeglądarki nie dają pod adresem `http://192.168.x.x`. W tym trybie dodasz więc tylko skrót do strony z menu przeglądarki.
+Z tego samego powodu w grze na laptopie nie ma przycisku mikrofonu: odpowiedzi wpisuje się w pole albo dyktuje mikrofonem z klawiatury telefonu.
 Jeśli masz własną domenę i certyfikat, możesz włączyć HTTPS opcjami `--cert`, `--key` i `--public-url`.
 
 ### Gdy telefon lub telewizor nie może się połączyć z laptopem
@@ -74,7 +104,7 @@ Najczęstszą przyczyną jest zapora Windows. Serwer ostrzega przy starcie, jeś
   `Set-NetConnectionProfile -InterfaceAlias "Wi-Fi" -NetworkCategory Private`
 - Gdy Windows zapyta o dostęp dla Pythona, zezwól na sieci prywatne.
 - W sieci, której nie chcesz oznaczać jako prywatną, otwórz tylko port gry dla urządzeń z tej samej podsieci:
-  `New-NetFirewallRule -DisplayName "Teleturniej" -Direction Inbound -Protocol TCP -LocalPort 8000 -RemoteAddress LocalSubnet -Action Allow`
+  `New-NetFirewallRule -DisplayName "Sutoliada" -Direction Inbound -Protocol TCP -LocalPort 8000 -RemoteAddress LocalSubnet -Action Allow`
 - Sprawdź, czy wszystkie urządzenia są w tej samej sieci. Sieci dla gości i niektóre sieci uczelniane blokują komunikację między urządzeniami.
 - Jeśli wykryty adres jest błędny (np. przez VPN albo kartę WSL), podaj go ręcznie: `.\start.bat --ip 192.168.1.13`.
 - Zajęty port zmienisz opcją `--port 8080`.
@@ -120,6 +150,7 @@ Bardzo stare telewizory mogą nie otworzyć adresu HTTPS z powodu nieaktualnych 
 ```
 server/        logika gier i serwer (aiohttp); stan gry jest tylko tutaj
   rooms.py     pokoje z kodami: każdy telewizor zakłada własną grę
+  answers.py   ocena odpowiedzi mówionych i pisanych (odmiana, liczby słownie, próba z błędnych opcji)
   games/       każda gra to automat stanów; każdy etap oczekiwania ma limit czasu
 web/tv/        ekran telewizora
 web/app/       PWA na telefon; ekrany gier opisuje serwer listą bloków
@@ -131,6 +162,7 @@ render.yaml    wdrożenie na Render.com (python -m server --cloud)
 Telefon nigdy nie dostaje poprawnej odpowiedzi przed jej ujawnieniem. Telewizor wraca do swojego pokoju dzięki tajnemu kluczowi zapisanemu w przeglądarce, więc nikt nie podejrzy gry, podając się za telewizor.
 
 **Nowe pytania:** dopisz je do plików w `data/`. Format łatwo odczytać z istniejących wpisów, a `tests/test_data.py` wychwyci błędy, np. wskazówkę zdradzającą odpowiedź.
+Inne dopuszczalne zapisy odpowiedzi podasz w polu `"alt"`, np. `{"q": "…", "a": "Ocean Spokojny", "alt": ["Pacyfik"], …}`. Tak samo działa to w hasłach The Floor, a w Familiadzie jako trzeci element odpowiedzi: `["Ręcznik", 34, ["ręczniki"]]`.
 
 **Punkty w Familiadzie są szacunkowe**, napisane ręcznie, a nie pochodzą z prawdziwej ankiety.
 

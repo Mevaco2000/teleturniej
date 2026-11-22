@@ -45,7 +45,9 @@
     if (g.screen === "picked" && g.lastPick) {
       var pick = g.lastPick;
       if (!pick.label) return esc(pick.player.name) + ": czas minął!";
-      return esc(pick.player.name) + ": " + esc(pick.label) + (pick.hit ? " (+" + pick.points + ")" : " — nie ma na tablicy!");
+      // Odpowiedź z głowy bywa odmieniona („kawa”), więc obok widać, do czego ją dopasowano.
+      var label = pick.board && pick.board !== pick.label ? "„" + esc(pick.label) + "” = " + esc(pick.board) : esc(pick.label);
+      return esc(pick.player.name) + ": " + label + (pick.hit ? " (+" + pick.points + ")" : " — nie ma na tablicy!");
     }
     if (g.screen === "round_end") {
       return "Rundę wygrywają " + esc(g.teams[g.roundWinner].name) + ": +" + g.bank * g.multiplier + " pkt";

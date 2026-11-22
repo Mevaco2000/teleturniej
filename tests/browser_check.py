@@ -4,11 +4,12 @@ Testy logiki nie wykryją błędów interfejsu, np. przycisku, który nic nie ro
 
     python tests/browser_check.py FOLDER_NA_ZRZUTY [gry] [--real-music]
 
-gry: oot,mil,fam,floor,mel (domyślnie wszystkie). --real-music gra wersje instrumentalne hitów z Deezer (wymaga internetu).
+gry: oot,mil,mila,fam,floor,mel,tour (domyślnie wszystkie; mila to Milionerzy „Wszyscy na drabince”, tour to turniej). --real-music gra wersje instrumentalne hitów z Deezer (wymaga internetu).
 Używa Edge lub Chrome zainstalowanego w systemie.
 """
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 import time
@@ -66,6 +67,25 @@ def phone_showing(phones, selector):
     return None, None
 
 
+def say(phone, text):
+    """Odpowiedź z głowy wpisana w pole (w prawdziwej grze także z mikrofonu)."""
+    box = phone.locator("form.answer-box input")
+    box.fill(text)
+    box.press("Enter")
+
+
+def try_mic(phone, name):
+    """Przeglądarka bez mikrofonu ma pokazać komunikat, a nie wywołać błąd strony."""
+    mic = phone.locator("button.mic")
+    if not mic.count():
+        print("  brak rozpoznawania mowy w tej przeglądarce: zostaje pole tekstowe")
+        return
+    mic.click()
+    time.sleep(1.2)
+    print("  mikrofon:", phone.locator(".heard").inner_text() or "(słucha)")
+    shot(phone, name)
+
+
 def click_first_option(phones):
     phone, locator = phone_showing(phones, "button.option:not([disabled])")
     if not phone:
@@ -105,23 +125,41 @@ def play_one_of_ten(tv, phones, host, real_music):
     tv.reload()
     tv.locator(".q-card").wait_for(timeout=5000)
     tv.keyboard.press("Enter")
-    bystander = next(p for p in phones if not p.locator("button.option").count())
+    bystander = next(p for p in phones if not p.locator("button.option, form.answer-box").count())
     bystander.reload()
     bystander.locator(".screen.theme-one_of_ten").wait_for(timeout=5000)
     assert not bystander.locator("#join").is_visible(), "odświeżony telefon stracił miejsce w grze"
     print("  odświeżenie TV i telefonu: gra trwa")
 
-    phone, locator = phone_showing(phones, "button.option")
-    assert phone, "żaden telefon nie pokazuje odpowiedzi"
-    shot(phone, "phone_oot_answer")
-    locator.nth(1).click()
-    tv.locator(".answer.correct").wait_for(timeout=4000)
-    shot(tv, "oot_3_reveal")
+    phone, locator = phone_showing(phones, "form.answer-box input")
+    if phone:
+        assert not tv.locator(".answers").count(), "TV pokazuje opcje w trybie z głowy"
+        shot(phone, "phone_oot_answer")
+        try_mic(phone, "phone_oot_mic")
+        say(phone, "Zanzibar")
+        tv.locator(".free-answer").wait_for(timeout=4000)
+        shot(tv, "oot_3_reveal")
+        accept = host.locator("button.btn", has_text="Uznaj odpowiedź")
+        accept.wait_for(timeout=3000)
+        shot(host, "phone_oot_accept")
+        accept.click()
+        wait_text(tv, "uznane przez gospodarza", timeout=3000)
+        time.sleep(0.5)  # żarówka szansy zapala się z animacją
+        assert tv.locator(".pod.active .bulb.on").count() == 3, "uznanie nie oddało szansy"
+        shot(tv, "oot_4_accepted")
+        print("  odpowiedź z głowy i uznanie przez gospodarza działają")
+    else:
+        phone, locator = phone_showing(phones, "button.option")
+        assert phone, "żaden telefon nie pokazuje odpowiedzi"
+        shot(phone, "phone_oot_answer")
+        locator.nth(1).click()
+        tv.locator(".answer.correct").wait_for(timeout=4000)
+        shot(tv, "oot_3_reveal")
     end_game(host)
 
 
 def play_millionaires(tv, phones, host, real_music):
-    start_game(host, "Milionerzy")
+    start_game(host, "Milionerzy", ["Jeden fotel + zakłady"])
     wait_text(tv, "Pytanie eliminacyjne")
     shot(tv, "mil_1_qualify")
     for phone in phones:
@@ -134,6 +172,13 @@ def play_millionaires(tv, phones, host, real_music):
     hot = next(p for p in phones if p.get_by_text("ostateczna odpowiedź").count())
     others = [p for p in phones if p is not hot]
     shot(hot, "phone_mil_hot")
+    # Widzowie obstawiają: jeden dobrą odpowiedź za 250, drugi pomyłkę za wszystko.
+    shot(others[0], "phone_mil_bet")
+    others[0].locator("button.btn", has_text="250").first.click()
+    others[1].locator("button.btn", has_text="Va banque").nth(1).click()
+    wait_text(tv, "Zakłady widzów", timeout=3000)
+    wait_text(others[0], "Obstawiasz dobrą odpowiedź", timeout=3000)
+    print("  zakłady widzów przyjęte")
     hot.locator("button.btn", has_text="50:50").click()
     time.sleep(0.3)
     assert hot.locator(".option.gone").count() == 2, "50:50 nie ukryło dwóch odpowiedzi"
@@ -150,7 +195,50 @@ def play_millionaires(tv, phones, host, real_music):
     shot(tv, "mil_6_selected")
     tap_text(hot, "ostateczna odpowiedź")
     tv.locator(".hex.correct").wait_for(timeout=6000)
+    tv.locator(".bet-line .good, .bet-line .bad").first.wait_for(timeout=3000)
     shot(tv, "mil_7_reveal")
+    shot(others[0], "phone_mil_bet_result")
+    end_game(host)
+
+
+def play_millionaires_all(tv, phones, host, real_music):
+    start_game(host, "Milionerzy", ["Wszyscy na drabince", "30 s"])
+    wait_text(tv, "Wszyscy na drabince")
+    tv.locator(".mil-players").wait_for(timeout=10000)
+    time.sleep(0.4)
+    shot(tv, "mila_1_question")
+    shot(phones[0], "phone_mila_question")
+    darek = phones[3]
+    # Darek się wycofuje i od razu zostaje publicznością.
+    darek.locator("button.btn", has_text="Wycofuję się").click()
+    darek.locator("button.option").first.wait_for(timeout=3000)
+    shot(darek, "phone_mila_audience")
+    darek.locator("button.option").nth(1).click()
+    # Celina bierze 50:50 i zatwierdza.
+    phones[2].locator("button.btn", has_text="50:50").click()
+    time.sleep(0.3)
+    assert phones[2].locator(".option.gone").count() == 2, "50:50 nie ukryło dwóch odpowiedzi"
+    phones[2].locator("button.option:not(.gone)").first.click()
+    tap_text(phones[2], "ostateczna odpowiedź")
+    # Ania dzwoni do Darka, który już nie gra.
+    phones[0].locator("button.btn", has_text="Telefon").click()
+    phones[0].locator("button.btn", has_text="Darek").click()
+    wait_text(darek, "Dzwoni", timeout=3000)
+    shot(darek, "phone_mila_friend")
+    darek.locator("button.option").first.click()
+    wait_text(phones[0], "Darek: A", timeout=3000)
+    shot(phones[0], "phone_mila_call_result")
+    shot(tv, "mila_2_decisions")
+    for phone in (phones[0], phones[1]):
+        phone.locator("button.option").nth(2).click()
+        tap_text(phone, "ostateczna odpowiedź")
+    wait_text(tv, "Sprawdzamy", timeout=4000)
+    time.sleep(0.3)
+    shot(tv, "mila_3_locked")
+    tv.locator(".hex.correct").wait_for(timeout=6000)
+    time.sleep(0.5)
+    shot(tv, "mila_4_reveal")
+    print("  wszyscy na drabince: wycofanie, publiczność, telefon do gracza i odsłonięcie działają")
     end_game(host)
 
 
@@ -165,16 +253,33 @@ def play_familiada(tv, phones, host, real_music):
     assert phone, "nikt nie ma przycisku zgłoszenia"
     shot(phone, "phone_fam_buzz")
     phone.locator("button.buzz").dispatch_event("pointerdown")
-    phone.locator("button.option").first.wait_for(timeout=4000)
+    phone.locator("form.answer-box input").wait_for(timeout=4000)
     shot(phone, "phone_fam_answer")
-    phone.locator("button.option").first.click()
+    # Pytanie z ekranu TV wskazuje tablicę w bazie; odpowiedź pada małymi literami i bez końcówki,
+    # tak jak mógłby ją zapisać telefon.
+    question = tv.locator(".fam-question").inner_text().strip()
+    boards = json.loads((PROJECT / "data" / "familiada.json").read_text(encoding="utf-8"))
+    board = next(b for b in boards if b["q"] == question)
+    spoken = [a[0].lower().rstrip("ęą") for a in board["answers"]]
+    say(phone, "kosmiczny odkurzacz")
     time.sleep(0.5)
     shot(tv, "fam_3_picked")
-    for _ in range(14):
+    words = spoken[:2] + ["kosmiczny odkurzacz", "latający dywan"] + spoken[2:]
+    for word in words * 2:
         if tv.locator(".fam-row.earned").count() and tv.locator(".strike.on").count():
             break
-        click_first_option(phones)
-        time.sleep(0.5)
+        active, _ = phone_showing(phones, "form.answer-box input")
+        if active:
+            try:
+                say(active, word)
+            except PlaywrightError:
+                pass  # gra przeszła dalej w trakcie wpisywania
+        else:
+            buzzer, _ = phone_showing(phones, "button.buzz")
+            if buzzer:
+                buzzer.locator("button.buzz").dispatch_event("pointerdown")
+        time.sleep(0.6)
+    assert tv.locator(".fam-row.earned").count(), "żadna odpowiedź z głowy nie trafiła na tablicę"
     shot(tv, "fam_4_board")
     end_game(host)
 
@@ -194,13 +299,19 @@ def play_floor(tv, phones, host, real_music):
     tv.locator(".duel-screen").wait_for(timeout=5000)
     shot(tv, "floor_3_intro")
     tv.locator(".card").wait_for(timeout=8000)
+    assert not tv.locator(".card-option").count(), "TV pokazuje opcje w trybie z głowy"
     shot(tv, "floor_4_duel")
-    active, option = phone_showing(phones, "button.option")
+    active, _ = phone_showing(phones, "form.answer-box input")
     if active:
         shot(active, "phone_floor_duel")
-        option.first.click()
-    time.sleep(0.25)
-    shot(tv, "floor_5_after_answer")
+        say(active, "Zanzibar")
+        tv.locator(".feedback.bad").wait_for(timeout=3000)
+        shot(tv, "floor_5_after_answer")
+        shot(active, "phone_floor_wrong")
+        active.locator("form.answer-box input").wait_for(timeout=4000)
+        say(active, "pas")
+        tv.locator(".feedback.pass").wait_for(timeout=3000)
+        print("  The Floor: zła odpowiedź z głowy i słowo „pas” działają")
     end_game(host)
 
 
@@ -219,7 +330,9 @@ def check_audio(tv, real_music):
 
 
 def play_melody(tv, phones, host, real_music):
-    start_game(host, "Jaka to melodia", ["Hity bez śpiewu" if real_music else "Melodie wbudowane", "6"])
+    # Tutaj tryb „Do wyboru”, żeby kontrola obejmowała też listę opcji.
+    start_game(host, "Jaka to melodia", ["Hity bez śpiewu" if real_music else "Melodie wbudowane", "6",
+                                         "Do wyboru (łatwiej)"])
     tv.locator(".eq.playing").wait_for(timeout=45000)
     time.sleep(0.6)
     shot(tv, "mel_1_play")
@@ -248,12 +361,58 @@ def play_melody(tv, phones, host, real_music):
     end_game(host)
 
 
+def play_tournament(tv, phones, host, real_music):
+    # Krótka pierwsza gra: The Floor bez botów i z 30-sekundowym zegarem.
+    host.locator(".game-card", has_text="The Floor").click()
+    for label in ("Tylko gracze", "30 s"):
+        host.locator("button.chip", has_text=label).first.click()
+        time.sleep(0.15)
+    host.locator("button.back").click()
+    start_game(host, "Turniej", ["Szybki (3)", "Tak"])
+    wait_text(tv, "Typujcie na telefonach")
+    shot(tv, "tour_1_predict")
+    shot(phones[1], "phone_tour_predict")
+    names = ["Ania", "Bartek", "Celina", "Darek"]
+    for phone in phones:
+        for name in names[:3]:
+            phone.locator("button.btn", has_text=name).first.click()
+            time.sleep(0.1)
+    tv.locator(".board").wait_for(timeout=8000)
+    wait_text(tv, "Turniej · gra 1 z 3")
+    shot(tv, "tour_2_first_game")
+    # Nikt nie odpowiada: pojedynki kończą się na zegarze. Wyzywający od razu wybiera rywala.
+    deadline = time.time() + 240
+    while time.time() < deadline and not tv.get_by_text("Wyniki:").count():
+        phone, locator = phone_showing(phones, "button.btn:has(.dot)")
+        if phone:
+            try:
+                locator.first.click(timeout=1000)
+            except PlaywrightError:
+                pass
+        time.sleep(1)
+    wait_text(tv, "Wyniki: The Floor", timeout=5000)
+    time.sleep(0.5)
+    shot(tv, "tour_3_scores")
+    shot(phones[0], "phone_tour_scores")
+    host.locator("button.btn", has_text="Dalej").click()
+    wait_text(tv, "Tabela turnieju", timeout=4000)
+    time.sleep(0.5)
+    shot(tv, "tour_4_table")
+    host.locator("button.btn", has_text="Dalej").click()
+    wait_text(tv, "Familiada", timeout=4000)
+    shot(tv, "tour_5_next")
+    print("  turniej: typowanie, gra w turnieju, wyniki z punktami i tabela działają")
+    end_game(host)
+
+
 GAMES = {
     "oot": play_one_of_ten,
     "mil": play_millionaires,
+    "mila": play_millionaires_all,
     "fam": play_familiada,
     "floor": play_floor,
     "mel": play_melody,
+    "tour": play_tournament,
 }
 
 

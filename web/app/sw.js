@@ -1,7 +1,7 @@
 /* Service worker działa tylko przez HTTPS lub na localhost. Sieć ma pierwszeństwo, żeby po
    aktualizacji serwera telefon nie został ze starą wersją, a pamięć podręczna pozwala otworzyć
    aplikację, gdy serwer jest chwilowo niedostępny. */
-var CACHE = "teleturniej-v2";
+var CACHE = "teleturniej-v4";
 var SHELL = [
   "/app/",
   "/app/app.css",

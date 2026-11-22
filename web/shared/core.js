@@ -35,6 +35,9 @@
       if (from.nodeValue !== to.nodeValue) from.nodeValue = to.nodeValue;
       return;
     }
+    // data-keep: element ze stanem po stronie klienta (pole odpowiedzi, mikrofon) zostaje nietknięty,
+    // dopóki ma ten sam data-key. Nowy klucz i tak podmienia cały element.
+    if (from.hasAttribute("data-keep") && to.hasAttribute("data-keep")) return;
     morphAttributes(from, to);
     morphChildren(from, to);
   }

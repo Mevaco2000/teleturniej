@@ -1,4 +1,9 @@
-"""Milionerzy: pytanie eliminacyjne, drabinka i koła ratunkowe obsługiwane przez telefony."""
+"""Milionerzy: pytanie eliminacyjne, drabinka i koła ratunkowe obsługiwane przez telefony.
+
+Dwa tryby (opcja „Tryb”):
+- „Jeden fotel”: jak w telewizji. Kto nie gra, obstawia żetonami, czy gracz na fotelu odpowie dobrze.
+- „Wszyscy na drabince”: wszyscy odpowiadają naraz, zob. millionaires_all.py.
+"""
 from __future__ import annotations
 
 from typing import Optional
@@ -18,6 +23,10 @@ REVEAL_SECONDS = 4
 TURN_END_SECONDS = 5
 # Szansa, że symulowana publiczność lub ekspert wskaże dobrą odpowiedź.
 HELPER_ACCURACY = {1: 0.95, 2: 0.8, 3: 0.6, 4: 0.45}
+# Zakłady w trybie jednego fotela: żetony na start i stawki do wyboru (plus „va banque”).
+START_CHIPS = 1000
+STAKES = (100, 250, 500)
+BET_SIDES = ("right", "wrong")
 
 
 def money(amount: int) -> str:
@@ -39,19 +48,36 @@ class Millionaires(Game):
     min_players = 1
     allow_spectators = True
     rules = [
-        "Pytanie eliminacyjne: najszybsza dobra odpowiedź sadza Cię na fotelu.",
-        "Dwanaście pytań coraz trudniejszych. Sumy gwarantowane: 1 000 zł i 40 000 zł.",
-        "Koła: 50:50, pytanie do publiczności (głosują inni na telefonach) i telefon do przyjaciela.",
-        "W każdej chwili możesz się wycofać i zabrać wygraną.",
+        "Dwanaście pytań coraz trudniejszych. Sumy gwarantowane: 1 000 zł i 40 000 zł. W każdej chwili możesz się wycofać z wygraną.",
+        "Koła: 50:50, pytanie do publiczności i telefon do przyjaciela (dzwonisz do innego gracza).",
+        "Tryb „Wszyscy na drabince”: wszyscy odpowiadają naraz na te same pytania i każdy sam decyduje, kiedy się wycofać. "
+        "Kto odpadnie, zostaje publicznością i przyjacielem do telefonu.",
+        "Tryb „Jeden fotel”: najszybsza dobra odpowiedź w eliminacjach sadza na fotelu, a reszta obstawia żetonami, "
+        "czy gracz odpowie dobrze.",
     ]
     option_defs = [{
+        "key": "mode",
+        "label": "Tryb",
+        "default": "all",
+        "choices": [{"v": "all", "l": "Wszyscy na drabince"}, {"v": "seat", "l": "Jeden fotel + zakłady"}],
+    }, {
         "key": "time",
         "label": "Czas na pytanie",
         "default": 60,
         "choices": [{"v": 30, "l": "30 s"}, {"v": 60, "l": "60 s"}, {"v": 120, "l": "2 min"}],
     }]
 
+    def __new__(cls, session, opts: dict, roster: list[str]):
+        # Tryb „Wszyscy na drabince” to osobny automat stanów z tymi samymi opcjami i kartą gry.
+        if cls is Millionaires and opts.get("mode") == "all":
+            from .millionaires_all import MillionairesAll
+            return super().__new__(MillionairesAll)
+        return super().__new__(cls)
+
     def start(self) -> None:
+        self.chips = {p: START_CHIPS for p in self.roster}
+        self.bets: dict[str, tuple[str, int]] = {}
+        self.bet_results: Optional[list[dict]] = None
         self.waiting = list(self.roster)
         self.earned: dict[str, int] = {}
         self.hot: Optional[str] = None
@@ -118,6 +144,8 @@ class Millionaires(Game):
         self.poll = None
         self.call = None
         self.friend = None
+        self.bets = {}
+        self.bet_results = None
         self.screen = "question"
         self.fx("question")
         self.set_timer(self.opts["time"], self._time_up)
@@ -143,6 +171,7 @@ class Millionaires(Game):
         self.cancel_timer()
         right = self.selected == self.q.correct
         self.screen = "reveal"
+        self._settle_bets(right)
         if right:
             self.outcome = "right"
             self.fx("good")
@@ -164,6 +193,7 @@ class Millionaires(Game):
     def _walk_away(self) -> None:
         self.cancel_timer()
         self.earned[self.hot] = LADDER[self.level - 1] if self.level else 0
+        self._settle_bets(None)
         self.outcome = "walked"
         self.screen = "reveal"
         self.fx("lock")
@@ -177,12 +207,50 @@ class Millionaires(Game):
 
     def _finish(self) -> None:
         ranking = []
-        for pid in sorted(self.roster, key=lambda p: -self.earned.get(p, 0)):
+        betting = len(self.roster) > 1
+        order = sorted(self.roster, key=lambda p: (-self.earned.get(p, 0), -self.chips[p]))
+        for pid in order:
             info = self.s.pinfo(pid)
             amount = self.earned.get(pid, 0)
+            label = money(amount) + (f" · żetony: {self.chips[pid]}" if betting else "")
             ranking.append({"id": pid, "name": info["name"], "color": info["color"],
-                            "score": amount, "label": money(amount)})
-        self.finish(ranking)
+                            "score": [amount, self.chips[pid]] if betting else amount, "label": label})
+        note = ""
+        if betting:
+            best = max(self.roster, key=lambda p: self.chips[p])
+            if self.chips[best] > START_CHIPS:
+                note = f"Najlepiej obstawiał(a) {self.name(best)}: {self.chips[best]} żetonów."
+        self.finish(ranking, note=note)
+
+    # --- Zakłady -----------------------------------------------------------
+
+    def _betting_open(self) -> bool:
+        return self.screen in ("question", "audience", "phone_pick", "phone_call")
+
+    def _stakes(self, pid: str) -> list[int]:
+        """Stawki do wyboru: stałe kwoty mniejsze niż stan konta i „va banque” za wszystko."""
+        chips = self.chips.get(pid, 0)
+        if chips <= 0:
+            return []
+        return [s for s in STAKES if s < chips] + [chips]
+
+    def _place_bet(self, pid: str, value) -> None:
+        if not (isinstance(value, list) and len(value) == 2):
+            return
+        side, stake = value
+        if side in BET_SIDES and isinstance(stake, int) and not isinstance(stake, bool) and stake in self._stakes(pid):
+            self.bets[pid] = (side, stake)
+
+    def _settle_bets(self, right: Optional[bool]) -> None:
+        """Dobra prognoza podwaja stawkę, zła ją zabiera. Po wycofaniu się gracza zakłady przepadają bez straty."""
+        results = []
+        for pid, (side, stake) in self.bets.items():
+            delta = 0 if right is None else (stake if (side == "right") == right else -stake)
+            self.chips[pid] += delta
+            results.append({"player": self.s.pinfo(pid), "side": side, "stake": stake, "delta": delta})
+        results.sort(key=lambda r: -r["delta"])
+        self.bet_results = results
+        self.bets = {}
 
     # --- Koła ratunkowe ----------------------------------------------------
 
@@ -283,6 +351,8 @@ class Millionaires(Game):
                 self._close_call(self.name(pid), value)
             elif value is None:
                 self._close_call(self.name(pid), None)
+        elif action == "bet" and self._betting_open() and pid != self.hot and pid in self.chips and pid not in self.bets:
+            self._place_bet(pid, value)
         elif pid == self.hot:
             self._hot_action(action, value, valid_answer)
 
@@ -332,6 +402,10 @@ class Millionaires(Game):
             "qualifyWinner": self.qualify_winner,
             "earned": money(self.earned.get(self.hot, 0)) if self.hot else "",
             "remaining": len(self.waiting),
+            "mode": "seat",
+            "bets": {"right": sum(1 for s, _ in self.bets.values() if s == "right"),
+                     "wrong": sum(1 for s, _ in self.bets.values() if s == "wrong")},
+            "betResults": self.bet_results if self.screen in ("reveal", "turn_end") else None,
         }
         if self.q:
             revealed = self.screen in ("reveal", "turn_end", "qualify_reveal")
@@ -404,9 +478,7 @@ class Millionaires(Game):
                 return self.pv(msg("Odpowiedź przyjęta. Czekamy na resztę.", big=True))
             return self.pv(options("qualify", self.q.options), sub="Pytanie eliminacyjne",
                            prompt=self.q.text, timer=self.timer_view())
-        if self.screen == "audience":
-            if pid in self.votes:
-                return self.pv(msg("Głos oddany.", big=True))
+        if self.screen == "audience" and pid not in self.votes:
             return self.pv(self._answer_block("vote"), sub="Jesteś w publiczności: zagłosuj!",
                            prompt=self.q.text, timer=self.timer_view("helper"))
         if self.screen == "phone_call" and pid == self.friend:
@@ -416,6 +488,43 @@ class Millionaires(Game):
                            timer=self.timer_view("helper"))
         if self.screen == "qualify" or not self.hot:
             return self.pv(msg("Trwają eliminacje. Patrz na telewizor.", big=True))
-        amount = self.earned.get(pid)
-        sub = f"Twoja wygrana: {money(amount)}" if amount is not None else ""
+        sub = self._spectator_sub(pid)
+        if pid in self.chips and self._betting_open():
+            return self.pv(*self._bet_blocks(pid), sub=sub, prompt=self.q.text)
+        if pid in self.chips and self.screen in ("reveal", "turn_end") and self.bet_results:
+            mine = next((r for r in self.bet_results if r["player"]["id"] == pid), None)
+            if mine:
+                delta = mine["delta"]
+                text = f"+{delta} żetonów!" if delta > 0 else f"{delta} żetonów." if delta < 0 else "Zakład zwrócony."
+                return self.pv(msg(text, "good" if delta > 0 else "bad" if delta < 0 else "info", big=True), sub=sub)
         return self.pv(msg(f"Na fotelu: {self.name(self.hot)}.", big=True), sub=sub)
+
+    def _spectator_sub(self, pid: str) -> str:
+        parts = []
+        if pid in self.chips:
+            parts.append(f"Żetony: {self.chips[pid]}")
+        if pid in self.earned:
+            parts.append(f"Wygrana: {money(self.earned[pid])}")
+        return "  ·  ".join(parts)
+
+    def _bet_blocks(self, pid: str) -> list[dict]:
+        hot = self.name(self.hot)
+        prize = money(LADDER[self.level])
+        if pid in self.bets:
+            side, stake = self.bets[pid]
+            what = "dobrą odpowiedź" if side == "right" else "pomyłkę"
+            return [msg(f"Obstawiasz {what} za {stake} żetonów. Trzymaj kciuki!", big=True)]
+        stakes = self._stakes(pid)
+        if not stakes:
+            return [msg(f"Na fotelu: {hot}. Żetony się skończyły, ale kibicować wolno!", big=True)]
+        blocks = []
+        if self.screen == "audience":
+            blocks.append(msg("Głos oddany. Możesz jeszcze obstawić."))
+        blocks.append(msg(f"Czy {hot} odpowie dobrze na pytanie za {prize}? Obstaw żetony."))
+        for side, label in (("right", "Odpowie dobrze"), ("wrong", "Pomyli się")):
+            blocks.append(msg(label, "good" if side == "right" else "bad"))
+            blocks.append(buttons(*[
+                btn("bet", "Va banque" if s == self.chips[pid] and s not in STAKES else str(s), v=[side, s], style="small")
+                for s in stakes
+            ]))
+        return blocks

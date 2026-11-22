@@ -1,7 +1,7 @@
 {
-  "name": "Teleturniej",
-  "short_name": "Teleturniej",
-  "description": "Pilot do teleturniejów na telewizorze",
+  "name": "Sutoliada",
+  "short_name": "Sutoliada",
+  "description": "Sutoliada – pilot do teleturniejów na telewizorze",
   "lang": "pl",
   "id": "/app/",
   "start_url": "/app/",

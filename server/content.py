@@ -3,8 +3,11 @@ from __future__ import annotations
 
 import json
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
+
+from .answers import voice_ready
 
 
 @dataclass
@@ -14,6 +17,22 @@ class Question:
     correct: int
     category: str
     difficulty: int
+    alts: list[str] = field(default_factory=list)
+    # Czy da się odpowiedzieć z głowy; inaczej gra pokazuje opcje także w trybie mówionym.
+    free: bool = False
+
+    @property
+    def answer(self) -> str:
+        return self.options[self.correct]
+
+    @property
+    def wrong(self) -> list[str]:
+        return [o for i, o in enumerate(self.options) if i != self.correct]
+
+
+@lru_cache(maxsize=None)
+def _voice_ready(answer: str, question: str, wrong: tuple, alts: tuple) -> bool:
+    return voice_ready(answer, question, wrong, alts)
 
 
 class _Deck:
@@ -48,7 +67,9 @@ class Content:
         raw = self.question_decks[difficulty].draw()
         options = [raw["a"], *raw["w"]]
         self.rng.shuffle(options)
-        return Question(raw["q"], options, options.index(raw["a"]), raw.get("c", ""), difficulty)
+        alts = list(raw.get("alt", []))
+        free = _voice_ready(raw["a"], raw["q"], tuple(raw["w"]), tuple(alts))
+        return Question(raw["q"], options, options.index(raw["a"]), raw.get("c", ""), difficulty, alts, free)
 
     def familiada(self) -> dict:
         return self.familiada_deck.draw()

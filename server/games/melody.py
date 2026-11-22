@@ -1,12 +1,20 @@
-"""Jaka to melodia: dźwięk gra na telewizorze, a telefony służą do zgłaszania się i odpowiedzi."""
+"""Jaka to melodia: dźwięk gra na telewizorze, a telefony służą do zgłaszania się i odpowiedzi.
+
+W trybie „Z głowy” zgłoszony gracz mówi lub wpisuje tytuł. Wystarczy charakterystyczne słowo
+tytułu („Rhapsody”), byle nie pasowało tak samo do innego utworu z gry.
+"""
 from __future__ import annotations
 
+import re
 from typing import Optional
 
-from .base import Game, btn, buttons, buzz, msg, options
+from ..answers import judge, spoken_texts
+from .base import ANSWERS_OPTION, Game, answer_box, btn, buttons, buzz, msg, options
 
 CLIP_SECONDS = 20
 ANSWER_SECONDS = 8
+# Powiedzenie tytułu trwa dłużej niż stuknięcie w listę, a rozpoznawanie mowy dokłada sekundę.
+VOICE_ANSWER_SECONDS = 12
 BID_SECONDS = 10
 REVEAL_SECONDS = 6
 INTRO_SECONDS = 4
@@ -25,11 +33,12 @@ class Melody(Game):
     rules = [
         "Muzyka gra na telewizorze. Znasz utwór? Zgłoś się na telefonie.",
         "Domyślnie hity grają bez śpiewu, w wersjach instrumentalnych. Rozpoznaj je po melodii.",
-        "Kto zgłosi się pierwszy, wybiera tytuł spośród czterech. Im szybciej, tym więcej punktów.",
+        "Kto zgłosi się pierwszy, mówi lub wpisuje tytuł (w łatwiejszym trybie wybiera z czterech). Im szybciej, tym więcej punktów.",
         "Zła odpowiedź blokuje Cię na ten utwór, a muzyka gra dalej dla pozostałych.",
         "Licytacja: tajnie deklarujesz, ile sekund potrzebujesz. Najniższa oferta gra i odpowiada.",
     ]
     option_defs = [
+        ANSWERS_OPTION,
         {"key": "category", "label": "Muzyka", "default": "all", "choices": [
             {"v": "all", "l": "Wszystko"}, {"v": "pl", "l": "Polskie"}, {"v": "int", "l": "Zagraniczne"},
             {"v": "old", "l": "Do lat 70."}, {"v": "80", "l": "Lata 80."}, {"v": "90", "l": "Lata 90."},
@@ -60,6 +69,8 @@ class Melody(Game):
         self.bids: dict[str, tuple[int, float]] = {}
         self.bid_winner: Optional[str] = None
         self.bid_value = 0
+        self.hint = ""
+        self.answer_id = 0
         self.progress = {"done": 0, "total": self.opts["count"]}
         self._errors = 0
         self.screen = "loading"
@@ -167,25 +178,46 @@ class Melody(Game):
 
     def _buzzed(self, pid: str) -> None:
         self.fx("buzz")
-        self.answerer = pid
         self.locked.add(pid)
         self._set_playing(False)
         self.pause_timer("clip")
+        self._ask_answer(pid)
+
+    def _ask_answer(self, pid: str) -> None:
+        self.answerer = pid
+        self.hint = ""
+        self.answer_id += 1
         self.screen = "answer"
-        self.set_timer(ANSWER_SECONDS, lambda: self._answered(None))
+        self.set_timer(VOICE_ANSWER_SECONDS if self.voice else ANSWER_SECONDS, lambda: self._answered(None))
 
     def _answered(self, chosen: Optional[int]) -> None:
+        label = self.option_labels[chosen] if chosen is not None else None
+        self._outcome(chosen is not None and chosen == self.correct, label)
+
+    def _said(self, texts: list[str]) -> None:
+        track = self.track
+        titles = {track.title, re.sub(r"\s*\([^)]*\)", "", track.title).strip()}
+        others = {t.title for t in self.tracks if t.title != track.title}
+        others |= {label.split(" — ")[-1] for i, label in enumerate(self.option_labels) if i != self.correct}
+        verdict = judge(texts, [sorted(t for t in titles if t)], context=track.artist, lenient=True,
+                        distractors=sorted(o for o in others if o and o not in titles))
+        if verdict.empty:
+            self.hint = "Nie usłyszałem tytułu. Powiedz jeszcze raz."
+            return
+        self._outcome(verdict.ok, verdict.heard)
+
+    def _outcome(self, correct: bool, label: Optional[str]) -> None:
         self.cancel_timer()
         pid = self.answerer
         if self.round == 2:
-            points = BID_POINTS[self.bid_value] if chosen == self.correct else 0
-            self._reveal(pid if points else None, points, chosen=chosen, answered_by=pid)
-        elif chosen == self.correct:
+            points = BID_POINTS[self.bid_value] if correct else 0
+            self._reveal(pid if points else None, points, wrong_label=None if correct else label, answered_by=pid)
+        elif correct:
             left = self.time_left("clip") / CLIP_SECONDS
-            self._reveal(pid, max(20, round(100 * left / 5) * 5), chosen=chosen, answered_by=pid)
+            self._reveal(pid, max(20, round(100 * left / 5) * 5), answered_by=pid)
         else:
             self.fx("bad")
-            self.result = {"wrong": True, "player": self.s.pinfo(pid)}
+            self.result = {"wrong": True, "player": self.s.pinfo(pid), "said": label if self.voice else None}
             self.answerer = None
             everyone_locked = all(p in self.locked or not self.s.is_connected(p) for p in self.roster)
             if everyone_locked:
@@ -195,7 +227,7 @@ class Melody(Game):
                 self._set_playing(True)
                 self.resume_timer("clip")
 
-    def _reveal(self, winner: Optional[str], points: int, chosen: Optional[int] = None,
+    def _reveal(self, winner: Optional[str], points: int, wrong_label: Optional[str] = None,
                 answered_by: Optional[str] = None) -> None:
         self.cancel_timer("clip")
         self.cancel_timer()
@@ -208,7 +240,7 @@ class Melody(Game):
             "winner": self.pinfo(winner),
             "points": points,
             "answeredBy": self.pinfo(answered_by),
-            "wrongAnswer": self.option_labels[chosen] if chosen is not None and not winner else None,
+            "wrongAnswer": wrong_label if not winner else None,
         }
         self.answerer = None
         self.screen = "reveal"
@@ -239,9 +271,7 @@ class Melody(Game):
 
     def _bid_clip_over(self) -> None:
         self._set_playing(False)
-        self.answerer = self.bid_winner
-        self.screen = "answer"
-        self.set_timer(ANSWER_SECONDS, lambda: self._answered(None))
+        self._ask_answer(self.bid_winner)
 
     # --- Koniec ------------------------------------------------------------
 
@@ -265,9 +295,13 @@ class Melody(Game):
             return
         if action == "buzz" and self.screen == "play" and pid not in self.locked:
             self._buzzed(pid)
-        elif action == "answer" and self.screen == "answer" and pid == self.answerer:
+        elif action == "answer" and self.screen == "answer" and pid == self.answerer and not self.voice:
             if isinstance(value, int) and 0 <= value < len(self.option_labels):
                 self._answered(value)
+        elif action == "say" and self.screen == "answer" and pid == self.answerer and self.voice:
+            texts = spoken_texts(m)
+            if texts:
+                self._said(texts)
         elif action == "bid" and self.screen == "bid" and pid not in self.bids and value in BIDS:
             self.bids[pid] = (value, self.clock.now())
             if all(p in self.bids or not self.s.is_connected(p) for p in self.roster):
@@ -297,6 +331,7 @@ class Melody(Game):
             "progress": self.progress,
             "clip": self.timer_view("clip"),
             "timer": self.timer_view(),
+            "voice": self.voice,
         }
         if self.screen == "reveal" and self.track:
             view["track"] = {
@@ -316,9 +351,16 @@ class Melody(Game):
             return self.pv(msg("Uwaga, zaraz zagra…", big=True), sub=sub)
         if self.screen == "play":
             if pid in self.locked:
-                return self.pv(msg("Ten utwór masz już z głowy. Czekaj na kolejny.", "bad", big=True), sub=sub)
+                blocks = [msg("Ten utwór masz już z głowy. Czekaj na kolejny.", "bad", big=True)]
+                result = self.result or {}
+                if result.get("said") and result.get("player", {}).get("id") == pid:
+                    blocks.append(msg(f"Usłyszałem: „{result['said']}”."))
+                return self.pv(*blocks, sub=sub)
             return self.pv(buzz("ZNAM TO!"), sub=sub)
         if self.screen == "answer":
+            if pid == self.answerer and self.voice:
+                blocks = ([msg(self.hint, "bad")] if self.hint else []) + [answer_box(f"t{self.answer_id}")]
+                return self.pv(*blocks, sub=sub, prompt="Jaki to tytuł?", timer=self.timer_view())
             if pid == self.answerer:
                 return self.pv(options("answer", self.option_labels, letters=False), sub=sub,
                                prompt="Co to za utwór?", timer=self.timer_view())

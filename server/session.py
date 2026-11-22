@@ -358,6 +358,9 @@ class Session:
     }
 
     def abort_game(self, message: str) -> None:
+        if self.game and self.game.absorb_abort(message):
+            self.touch()
+            return
         if self.game:
             try:
                 self.game.stop()

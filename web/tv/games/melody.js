@@ -38,10 +38,12 @@
         return '<div class="status-big"><div class="status-text">Uwaga…</div></div>' + equalizer(false);
       case "play":
         return '<div class="mel-title">Jaka to melodia?</div>' + equalizer(true) + Core.timerBar(g.clip) +
-          (g.result && g.result.wrong ? '<div class="reveal-note bad">' + esc(g.result.player.name) + ": źle! Muzyka gra dalej.</div>"
+          (g.result && g.result.wrong ? '<div class="reveal-note bad">' + esc(g.result.player.name) +
+            (g.result.said ? ": „" + esc(g.result.said) + "”" : "") + " — źle! Muzyka gra dalej.</div>"
             : '<div class="reveal-note">Zgłoś się na telefonie!</div>');
       case "answer":
-        return '<div class="status-big">' + TV.chip(g.answerer, "big") + '<div class="status-text">wybiera tytuł</div></div>' + equalizer(false) + Core.timerBar(g.timer);
+        return '<div class="status-big">' + TV.chip(g.answerer, "big") + '<div class="status-text">' + (g.voice ? "mówi tytuł" : "wybiera tytuł") +
+          "</div></div>" + equalizer(false) + Core.timerBar(g.timer);
       case "bid":
         return '<div class="mel-title">Ile sekund Ci wystarczy?</div><div class="status-sub">Licytuj na telefonie. Najniższa oferta gra.</div>' + Core.timerBar(g.timer);
       case "bid_play":
@@ -52,7 +54,7 @@
           ? '<img class="art" src="' + esc(g.track.art) + '" alt="">'
           : '<div class="art art-empty">♪</div>';
         var outcome = r.winner ? esc(r.winner.name) + ": +" + r.points + " pkt"
-          : r.answeredBy ? esc(r.answeredBy.name) + (r.wrongAnswer ? " wybrał(a): " + esc(r.wrongAnswer) : ": czas minął") : "Nikt nie odgadł";
+          : r.answeredBy ? esc(r.answeredBy.name) + (r.wrongAnswer ? ": „" + esc(r.wrongAnswer) + "” — źle" : ": czas minął") : "Nikt nie odgadł";
         return '<div class="reveal-track">' + art + '<div><div class="track-title">' + esc(g.track ? g.track.title : "") +
           '</div><div class="track-artist">' + esc(g.track ? g.track.artist : "") + '</div><div class="track-outcome ' + (r.winner ? "good" : "bad") + '">' + outcome + "</div></div></div>";
     }

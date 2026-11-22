@@ -40,6 +40,7 @@ html.unlocked body { cursor: none; }
 .theme-floor { --accent: #2ee6d6; --bg1: #07505c; --bg2: #02090f; }
 .theme-familiada { --accent: #ffc524; --bg1: #1b4fbf; --bg2: #050d33; }
 .theme-millionaires { --accent: #ff9d2e; --bg1: #2a2fa8; --bg2: #03051c; }
+.theme-tournament { --accent: #ffd24a; --bg1: #5a2d91; --bg2: #0a0620; }
 
 .unlock {
   position: fixed;
@@ -113,6 +114,17 @@ html.unlocked body { cursor: none; }
 .reveal-note { margin-top: 1rem; color: var(--muted); font-size: 2.2rem; text-align: center; }
 .reveal-note.bad { color: #ff9aa1; }
 
+/* Odpowiedzi z głowy: zamiast siatki ABCD poprawna odpowiedź i to, co powiedział gracz. */
+.say-note { margin-top: 1.2rem; color: var(--muted); font-size: 2.2rem; text-align: center; }
+.free-answer { display: flex; flex-direction: column; align-items: center; margin-top: 1.2rem; padding: 1rem 2.4rem; border: .12rem solid var(--line); border-radius: 1.2rem; background: var(--panel); animation: pop-in .25s ease-out; }
+.free-answer span { color: var(--muted); font-size: 1.7rem; text-transform: uppercase; letter-spacing: .08em; }
+.free-answer b { font: 800 3.6rem "Barlow Condensed", Arial, sans-serif; line-height: 1.1; text-align: center; }
+.free-answer.correct { border-color: var(--good); background: var(--good); color: #04220f; }
+.free-answer.correct span { color: inherit; opacity: .75; }
+.said { margin-top: .9rem; font-size: 2.3rem; font-weight: 700; text-align: center; }
+.said.good { color: var(--good); }
+.said.bad { color: #ff9aa1; }
+
 .answers { display: grid; grid-template-columns: 1fr 1fr; grid-gap: 1rem; width: 100%; margin-top: 1rem; }
 .answer {
   display: flex;
@@ -161,6 +173,26 @@ html.unlocked body { cursor: none; }
 .tile-floor { background: linear-gradient(120deg, #077a82, #0b2b41); }
 .tile-familiada { background: linear-gradient(120deg, #1d56cc, #0f2174); }
 .tile-millionaires { background: linear-gradient(120deg, #35269a, #0c1449); }
+.tile-tournament { background: linear-gradient(120deg, #b8860b, #4a1f7a); }
+
+/* --- Turniej --- */
+.tour { display: flex; width: 100%; height: 100%; flex-direction: column; align-items: center; padding: 2rem 3rem; }
+.tour-games { display: flex; flex: none; flex-wrap: wrap; justify-content: center; }
+.tour-games span { margin: .3rem; padding: .4rem 1.2rem; border: .12rem solid var(--line); border-radius: 2rem; color: var(--muted); font-size: 1.6rem; font-weight: 700; }
+.tour-games .done { border-color: transparent; background: rgba(255, 255, 255, .1); color: var(--ink); }
+.tour-games .now { border-color: var(--accent); color: var(--accent); }
+.tour-tipped { display: flex; flex: none; flex-wrap: wrap; justify-content: center; margin-bottom: 1.2rem; }
+.tour .timer-bar { flex: none; width: 70%; }
+.tour-title { flex: none; margin: 1.6rem 0 1rem; color: var(--accent); font: 800 4rem "Barlow Condensed", Arial, sans-serif; }
+.tour-table { border-collapse: collapse; font-size: 2.1rem; animation: pop-in .35s ease-out; }
+.tour-table th { padding: .3rem 1.4rem; color: var(--muted); font-size: 1.5rem; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
+.tour-table td { padding: .45rem 1.4rem; border-top: .1rem solid var(--line); text-align: center; }
+.tour-table td:nth-child(2) { text-align: left; }
+.tour-place { color: var(--accent); font: 800 2.6rem "Barlow Condensed", Arial, sans-serif; }
+.tour-tips { max-width: 26rem; color: var(--muted); font-size: 1.6rem; }
+.tour-gain { color: #7ff0ad; font-weight: 700; }
+.standings { font-size: 2.5rem; }
+.tour-badge { position: fixed; top: .8rem; left: 50%; z-index: 5; padding: .3rem 1.2rem; border-radius: 2rem; background: rgba(0, 0, 0, .55); color: #ffd24a; font-size: 1.4rem; font-weight: 700; transform: translateX(-50%); }
 
 .selected-game { padding: 2rem 2.4rem; border-radius: 1.6rem; animation: pop-in .3s ease-out; }
 .selected-title { font: 800 5rem/1 "Barlow Condensed", Arial, sans-serif; }
@@ -365,6 +397,22 @@ html.unlocked body { cursor: none; }
 .mil-mid { display: flex; flex: 1; min-height: 0; flex-direction: column; align-items: center; justify-content: center; }
 .mil-outcome { font: 800 4.2rem "Barlow Condensed", Arial, sans-serif; animation: pop-in .35s ease-out; }
 .mil-outcome.bad { color: #ff9aa1; }
+.bet-line { margin-top: .8rem; font-size: 2rem; font-weight: 700; text-align: center; }
+.bet-line .good { color: #7ff0ad; }
+.bet-line .bad { color: #ff9aa1; }
+.mil-status { color: var(--muted); font-size: 2.2rem; font-weight: 700; text-align: center; }
+
+/* Tryb „Wszyscy na drabince”: gracze, ich decyzje i to, kto co zaznaczył. */
+.mil-players { display: flex; flex: none; flex-wrap: wrap; justify-content: center; margin-top: 1rem; }
+.mp { display: flex; align-items: center; margin: .3rem; padding: .3rem 1rem .3rem .3rem; border-radius: 2.4rem; background: rgba(255, 255, 255, .08); font-size: 1.8rem; font-weight: 700; transition: background .3s, opacity .3s; }
+.mp .avatar { margin-right: .6rem; }
+.mp em { margin-left: .6rem; color: var(--muted); font-size: 1.5rem; font-style: normal; font-weight: 600; }
+.mp.locked { box-shadow: inset 0 0 0 .15rem var(--accent); }
+.mp.walked, .mp.out { opacity: .55; }
+.mp.right { background: rgba(30, 168, 92, .45); opacity: 1; }
+.mp.wrong { background: rgba(201, 32, 43, .5); opacity: 1; }
+.pickers { display: flex; margin-left: auto; padding-left: .6rem; }
+.pickers .avatar { width: 2.4rem; height: 2.4rem; margin-left: .2rem; font-size: 1.3rem; }
 
 .hex {
   --edge: #6e86ff;
